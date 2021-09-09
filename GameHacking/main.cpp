@@ -3,6 +3,8 @@
 #include <iostream>
 #include <string>
 #include <optional>
+#include <winternl.h>
+#include <psapi.h>
 #include "util.h"
 
 
@@ -29,10 +31,11 @@ std::optional<DWORD> getProcessIdByName( const std::wstring& processName )
 	return pid;
 }
 
-std::optional<HANDLE> accessProcess( const std::wstring& processName )
+std::optional<HANDLE> getProcessHandle( const std::wstring& processName,
+	DWORD rights = PROCESS_ALL_ACCESS )
 {
 	auto pid = getProcessIdByName( processName );
-	HANDLE hProc = OpenProcess( PROCESS_ALL_ACCESS,
+	HANDLE hProc = OpenProcess( rights,
 		false,
 		*pid );
 	if ( !hProc )
@@ -66,13 +69,13 @@ bool listProcessModules( DWORD pid )
 	// walk the module list of the process and display info
 	do
 	{
-		std::cout << "\n\nmodule name = " << moduleEntry.szModule;
-		std::cout << "\nexe path = " << moduleEntry.szExePath;
-		std::cout << "\npid = " << moduleEntry.th32ProcessID;
-		std::cout << "\nRef count (g) = " << moduleEntry.GlblcntUsage;
-		std::cout << "\nRef count (p) = " << moduleEntry.ProccntUsage;
-		//std::cout << "\nBase address = " << moduleEntry.modBaseAddr;
-		std::cout << "\nBase size = " << moduleEntry.modBaseSize;
+		std::cout << "\n\nmodule name = " << moduleEntry.szModule
+			<< "\nexe path = " << moduleEntry.szExePath
+			<< "\npid = " << moduleEntry.th32ProcessID
+			<< "\nRef count (g) = " << moduleEntry.GlblcntUsage
+			<< "\nRef count (p) = " << moduleEntry.ProccntUsage
+		//<< "\nBase address = " << moduleEntry.modBaseAddr
+			<< "\nBase size = " << moduleEntry.modBaseSize;
 	} while( Module32NextW( hModuleSnapshot, &moduleEntry ) );
 
 	CloseHandle( hModuleSnapshot );
@@ -102,9 +105,9 @@ bool listProcessThreads( DWORD pid )
 	{
 		if ( threadEntry.th32OwnerProcessID == pid )
 		{
-			std::cout << "\n\nthread id = " << threadEntry.th32ThreadID;
-			std::cout << "\nbase priority = " << threadEntry.tpBasePri;
-			std::cout << "\ndelta priority = " << threadEntry.tpDeltaPri;
+			std::cout << "\n\nthread id = " << threadEntry.th32ThreadID
+				<< "\nbase priority = " << threadEntry.tpBasePri
+				<< "\ndelta priority = " << threadEntry.tpDeltaPri;
 		}
 	} while( Thread32Next( hThreadSnapshot, &threadEntry ) );
 
@@ -140,11 +143,11 @@ bool listProcesses()
 	// enumerate the rest
 	while ( Process32NextW( hSystemSnapshot, &processEntry ) )
 	{
-		std::cout << "\n\nprocess name = " << processEntry.szExeFile;
-		std::cout << "\npid = " << processEntry.th32ProcessID;
-		std::cout << "\nthread count = " << processEntry.cntThreads;
-		std::cout << "\nparent's pid = " << processEntry.th32ParentProcessID;
-		std::cout << "\npriority base = " << processEntry.pcPriClassBase;
+		std::cout << "\n\nprocess name = " << processEntry.szExeFile
+			<< "\npid = " << processEntry.th32ProcessID
+			<< "\nthread count = " << processEntry.cntThreads
+			<< "\nparent's pid = " << processEntry.th32ParentProcessID
+			<< "\npriority base = " << processEntry.pcPriClassBase;
 		priority = GetPriorityClass( hProc );
 		if ( priority )
 		{
@@ -154,6 +157,83 @@ bool listProcesses()
 
 	CloseHandle( hSystemSnapshot );					// clean the snapshot object
 	return true;
+}
+
+bool setProcessDebugPrivileges( HANDLE hProc )
+{
+	HANDLE hToken;
+	TOKEN_PRIVILEGES newPrivileges;
+	LUID luid;
+
+	OpenProcessToken( hProc,
+		TOKEN_ADJUST_PRIVILEGES,
+		&hToken );
+	LookupPrivilegeValueW( nullptr,
+		L"seDebugPrivilege",
+		&luid );
+	newPrivileges.PrivilegeCount = 1;
+	newPrivileges.Privileges[0].Luid = luid;
+	newPrivileges.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+
+	int ret = AdjustTokenPrivileges( hToken,
+		false,
+		&newPrivileges,
+		0,
+		nullptr,
+		nullptr );
+	if ( !ret )
+	{
+		return false;
+	}
+
+	CloseHandle( hToken );
+	return true;
+}
+
+#if _WIN64
+// If GetModuleHandle is hooked this won't work
+HANDLE getCurrentProcessBaseAddress()
+{
+	return GetModuleHandle( nullptr );
+}
+#else
+HANDLE getCurrentProcessBaseAddress()
+{
+	const PPEB pPeb = reinterpret_cast<PPEB>( __readfsdword( 0x30 ) );
+	return pPeb->Reserved3[1];
+}
+#endif
+
+std::optional<HMODULE> getProcessBaseAddress( const std::wstring& windowTitle,
+	const std::wstring& exeName )
+{
+	const auto hProc = getProcessHandle( windowTitle,
+		 PROCESS_VM_READ | PROCESS_QUERY_INFORMATION );
+	if ( !*hProc )
+	{
+		return std::nullopt;
+	}
+
+	HMODULE hModules[1024];
+	DWORD requiredBytes;
+	if ( EnumProcessModules( *hProc, hModules, sizeof( hModules ), &requiredBytes ) )
+	{
+		const DWORD nModules = requiredBytes / sizeof( HMODULE );
+		for ( unsigned i = 0; i < nModules; ++i )
+		{
+			TCHAR szModuleName[MAX_PATH];
+			const DWORD nChars = sizeof( szModuleName ) / sizeof( TCHAR );
+			if ( GetModuleFileNameEx( *hProc, hModules[i], szModuleName, nChars ) )
+			{
+				const std::wstring moduleName = szModuleName;
+				if ( moduleName.find( exeName ) != std::string::npos )
+				{
+					return hModules[i];
+				}
+			}
+		}
+	}
+	return std::nullopt;
 }
 
 template<typename T>
@@ -195,9 +275,33 @@ std::size_t writeProcessMemory( HANDLE hProc,
 }
 #pragma endregion
 
+void tests()
+{
+	const std::wstring targetWindowTitle = L"Calculator";
+	const std::wstring targetExe = L"calc.exe";
+	const auto procBaseAddr = getProcessBaseAddress( targetWindowTitle,
+		targetExe );
+	if ( !procBaseAddr )
+	{
+		std::cout << "Process not found!\n";
+	}
+	std::cout << *procBaseAddr
+		<< '\n';
+
+	std::cout << "getCurrentProcessBaseAddress:"
+		<< '\n';
+	std::cout << getCurrentProcessBaseAddress()
+		<< '\n';
+	std::cout << THIS_INSTANCE
+		<< '\n';
+}
+
 
 int main()
 {
+	tests();
+
+
 	DWORD pAmmo = 0x00e0db44;	// RVA of ammo in COD4
 	int readAmmo;
 	SIZE_T bytesRead = 0;
@@ -207,7 +311,7 @@ int main()
 	std::wstring processName{L"Call of Duty 4"};
 	auto szProcessName = processName.c_str();
 
-	std::optional<HANDLE> hProc = accessProcess( processName );
+	std::optional<HANDLE> hProc = getProcessHandle( processName );
 	if ( !hProc )
 	{
 		help();

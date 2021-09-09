@@ -119,6 +119,6 @@ static_assert( _MSVC_LANG >= 201703L,
 #define IDC_STATIC					-1
 
 
-// provides relocatable base address at RVA = 0
+// provides relocatable process base address at RVA = 0
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 #define THIS_INSTANCE ( (HINSTANCE)&__ImageBase )
