@@ -1,0 +1,92 @@
+Goal: We search for instructions in memory to replace with our own to change process behavior to suit our needs.
+
+Pattern Scanning or Signature Scanning is the art of finding a sequence of bytes in memory which matches a sequence of bytes you already identified. You scan the good regions of memory byte by byte looking for the first byte. When the first byte is found, you compare each subsequent byte against the known pattern. If all the bytes are found, your pattern is found. If your comparison for 1 byte fails, you start over at the next byte.
+
+Note that we pattern scan for Code not data
+
+We can scan a module, instead of an entire address.
+
+This forms the elementary part of a trainer.
+
+
+--- Process:
+
+Open Cheat Engine
+	find the address you want
+
+Now we want to see "Find out what writes to this address"
+	when you find an instruction (the one with most uses/count) press "Show this Address in the Disassembler"
+		then Go to Address and copy the address
+005BF8E4
+
+Detach Cheat Engine from process (it may confuse Ollydbg).
+
+Open Ollydbg and attach the process
+	(Olly version 1) (with signature scan plugin installed Ollydbg.dll)
+paste address by typing in: Go to -> Expression (Follow Expression window appears)
+
+005BF8E4   8994B8 34010000  MOV DWORD PTR DS:[EAX+EDI*4+134],EDX
+
+when you find it -> RMB -> Make Sig -> Test Sig
+and copy and paste:
+- Signature: \x89\x94\xB8\x00\x00\x00\x00
+- Mask: xxx????
+	Question marks indicate relocatable instruction bytes so we won't consider them in our scanning later in the code
+Press "Scan" to make sure this pattern exists uniquely in the executable's memory.
+
+Also note down the signature length (in Bytes):
+This means we need that many amount of nop (\x90) instructions.
+Here the signature is 7 bytes, thus:
+\x90\x90\x90\x90\x90\x90\x90
+
+In cheat engine also check the module name. It should be something like
+moduleName+{address}
+
+iw3sp.exe+1BF8E4
+
+So "iw3sp.exe" is what we need.
+
+With all this info noted down, lets go to Visual Studio create a dll..
+
+
+Inject the dll in some way to your target process.
+Don't forget to detach any debuggers before you attach the dll!
+
+
+Anti Hacking:
+https://waleedassar.blogspot.com/2011/12/debuggers-anti-attaching-techniques.html
+I. Some process have anti-cheating/hacking/debugging techniques embedded.
+These typically work by hooking addresses such as DbgUiRemoteBreakin or DbgBreakPoint
+Trying to attach to such a process, as you can see in the image below,
+	results into terminating the process.
+
+To bypass this set a breakpoint on the "RtlCreateUserThread" function call,
+	and finally modify its seventh paramter to point to any int3 in the target process address space.
+Once execution stops at int3 (in the debugged program), kill the current thread.
+This way we can bypass this anti-attach trick whether the "DbgUiRemoteBreakin" or "DbgBreakPoint" function is patched in the target process address space.
+
+II.
+The point here is based on the fact that only one debugger is allowed to debug a specific process.
+Implementing it is as easy as creating two executables (hereafter, i will refer to them as EXE1 and EXE2).
+EXE1 spawns and then debugs EXE2. So, any further attempt to debug EXE2 will fail.
+N.B. Any attempt to close EXE1 will result in EXE2 being closed as such.
+
+To circumvent it, all we have to do is detach EXE2 from its debugger (EXE1) by calling the "DebugActiveProcessStop" function in context of the debugging thread in EXE1.
+Create a small debugger (I refer to it as EXE3) which:
+1) EXE3 debugs EXE1.
+2) EXE3 patches the "WaitForDebugEvent" function in the debug loop of EXE1, inserting a jump to the "DebugActiveProcessStop" function.
+
+
+TQ
+==
+Money
+-----
+Address:
+	24895CD0
+
+Instruction:
+	Go to address: 0165CED3
+	mov [edx+00000AF0],eax
+	Game.GAME::MarketArmor_Used::GetMarketType+3A43 - 89 82 F00A0000       
+
+
