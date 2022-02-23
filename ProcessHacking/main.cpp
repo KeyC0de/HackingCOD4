@@ -8,12 +8,16 @@
 #include <lm.h>
 #include <lmaccess.h>
 #include <lmerr.h>
+#include <dbghelp.h>
 #include "utils.h"
 #include "os_utils.h"
 #include "assertions_console.h"
+#include "system_info.h"
 
 #pragma comment( lib, "netapi32.lib" )
 #pragma comment( lib, "psapi.lib" )
+#pragma comment( lib, "user32.lib" )
+#pragma comment( linker, "/SUBSYSTEM:WINDOWS" )
 
 
 void help()
@@ -21,6 +25,67 @@ void help()
 	std::cout << "Make sure the requested resource is currently active!\n";
 }
 
+
+enum class Register : int
+{
+	eax = 1,
+	ebx,
+	ecx,
+	edx,
+	esi,
+	edi
+};
+
+/*
+void printFileVersion( TCHAR* szFilePath )
+{
+	DWORD               dwSize              = 0;
+	BYTE                *pbVersionInfo      = nullptr;
+	VS_FIXEDFILEINFO    *pFileInfo          = nullptr;
+	UINT                puLenFileInfo       = 0;
+
+	// Get the version information for the file requested
+	dwSize = GetFileVersionInfoSizeW( szFilePath, nullptr );
+	if ( dwSize == 0 )
+	{
+		printf( "Error in GetFileVersionInfoSize: %d\n", GetLastError() );
+		return;
+	}
+
+	pbVersionInfo = new BYTE[ dwSize ];
+
+	if ( !GetFileVersionInfoW( szFilePath, 0, dwSize, pbVersionInfo ) )
+	{
+		printf( "Error in GetFileVersionInfo: %d\n", GetLastError() );
+		delete[] pbVersionInfo;
+		return;
+	}
+
+	if ( !VerQueryValueW( pbVersionInfo, TEXT("\\"), (LPVOID*) &pFileInfo, &puLenFileInfo ) )
+	{
+		printf( "Error in VerQueryValue: %d\n", GetLastError() );
+		delete[] pbVersionInfo;
+		return;
+	}
+
+	// pFileInfo->dwFileVersionMS is usually zero. However, you should check
+	// this if your version numbers seem to be wrong
+	printf( "File Version: %d.%d.%d.%d\n",
+		( pFileInfo->dwFileVersionLS >> 24 ) & 0xff,
+		( pFileInfo->dwFileVersionLS >> 16 ) & 0xff,
+		( pFileInfo->dwFileVersionLS >>  8 ) & 0xff,
+		( pFileInfo->dwFileVersionLS >>  0 ) & 0xff
+		);
+
+	// pFileInfo->dwProductVersionMS is usually zero. However, you should check
+	// this if your version numbers seem to be wrong.
+	printf( "Product Version: %d.%d.%d.%d\n",
+		( pFileInfo->dwProductVersionLS >> 24 ) & 0xff,
+		( pFileInfo->dwProductVersionLS >> 16 ) & 0xff,
+		( pFileInfo->dwProductVersionLS >>  8 ) & 0xff,
+		( pFileInfo->dwProductVersionLS >>  0 ) & 0xff
+		);
+}*/
 
 //===================================================
 //	\function	enumerateInstalledPrograms
@@ -39,24 +104,34 @@ bool enumerateInstalledPrograms()
 	DWORD dwType = KEY_ALL_ACCESS;
 	DWORD dwBufferSize = 0;
 
-	if ( RegOpenKeyExW( HKEY_LOCAL_MACHINE, sRoot, 0, KEY_READ, &hUninstKey ) != ERROR_SUCCESS )
-	{
-		return false;
-	}
+	int ret = RegOpenKeyExW( HKEY_LOCAL_MACHINE, sRoot, 0, KEY_READ, &hUninstKey );
+	ASSERT_HRES_REGISTRY_IF_FAILED( ret );
 
 	for ( DWORD dwIndex = 0; lResult == ERROR_SUCCESS; dwIndex++ )
 	{
 		// enumerate all sub keys...
 		dwBufferSize = sizeof sAppKeyName;
-		if ( (lResult = RegEnumKeyExW( hUninstKey, dwIndex, sAppKeyName,
-			&dwBufferSize, nullptr, nullptr, nullptr, nullptr ) ) == ERROR_SUCCESS)
+		lResult = RegEnumKeyExW( hUninstKey,
+			dwIndex,
+			sAppKeyName,
+			&dwBufferSize,
+			nullptr,
+			nullptr,
+			nullptr,
+			nullptr );
+		if ( lResult == ERROR_SUCCESS )
 		{
 			// open the sub key
 			wsprintfW( sSubKey,
 				L"%s\\%s",
 				sRoot,
 				sAppKeyName );
-			if ( RegOpenKeyExW( HKEY_LOCAL_MACHINE, sSubKey, 0, KEY_READ, &hAppKey ) != ERROR_SUCCESS )
+			int ret = RegOpenKeyExW( HKEY_LOCAL_MACHINE,
+				sSubKey,
+				0,
+				KEY_READ,
+				&hAppKey );
+			if ( ret != ERROR_SUCCESS )
 			{
 				RegCloseKey( hAppKey );
 				RegCloseKey( hUninstKey );
@@ -65,8 +140,16 @@ bool enumerateInstalledPrograms()
 
 			//Get the display name value from the application's sub key.
 			dwBufferSize = sizeof sDisplayName;
-			if ( RegQueryValueExW( hAppKey, L"DisplayName", nullptr,
-				&dwType, (unsigned char*)sDisplayName, &dwBufferSize ) == ERROR_SUCCESS )
+
+			ret = RegQueryValueExW( hAppKey,
+				L"DisplayName",
+				nullptr,
+				&dwType,
+				(unsigned char*)sDisplayName,
+				&dwBufferSize );
+			ASSERT_HRES_REGISTRY_IF_FAILED( ret );
+
+			if ( ret == ERROR_SUCCESS )
 			{
 				wprintf( L"%s\n", sDisplayName );
 			}
@@ -84,7 +167,7 @@ bool enumerateInstalledPrograms()
 }
 
 int netQueryInformation( int argc,
-	char *argv[ ] )
+	char* argv[] )
 {
 	PNET_DISPLAY_GROUP pBuff, p;
 	DWORD res, dwRec, i = 0;
@@ -103,7 +186,6 @@ int netQueryInformation( int argc,
 	}
 	do
 	{ 
-		//
 		// The NetQueryDisplayInformation function returns user account, computer, or group account information.
 		//	Call this function to quickly enumerate account information for display in user interfaces.
 		// 1 = user account information, 2 = computer information, 3 group account info
@@ -114,18 +196,15 @@ int netQueryInformation( int argc,
 			MAX_PREFERRED_LENGTH,
 			&dwRec,
 			(PVOID*) &pBuff );
-		//
-		// If the call succeeds,
-		//
-		if((res==ERROR_SUCCESS) || (res==ERROR_MORE_DATA))
+
+		// If the call succeeds
+		if ( ( res == ERROR_SUCCESS ) || ( res == ERROR_MORE_DATA ) )
 		{
 			p = pBuff;
-			for(;dwRec>0;dwRec--)
+			for ( ; dwRec > 0; dwRec-- )
 			{
-				//
 				// Print the retrieved group information.
-				//
-				printf("Name:		%S\n"
+				printf( "Name:		%S\n"
 						"Comment:	%S\n"
 						"Group ID:  %u\n"
 						"Attributes: %u\n"
@@ -133,16 +212,13 @@ int netQueryInformation( int argc,
 						p->grpi3_name,
 						p->grpi3_comment,
 						p->grpi3_group_id,
-						p->grpi3_attributes);
-				//
+						p->grpi3_attributes );
+
 				// If there is more data, set the index.
-				//
 				i = p->grpi3_next_index;
 				p++;
 			}
-			//
 			// Free the allocated memory.
-			//
 			NetApiBufferFree( pBuff );
 		}
 		else
@@ -161,8 +237,10 @@ int netQueryInformation( int argc,
 //	that stores user accounts and security descriptors for users on the local computer
 // The NetUserEnum function does not support a level parameter of 4 and the USER_INFO_4 structure.
 // Instead NetUserGetInfo function supports a level parameter of 4 and the USER_INFO_4 structure.
+#pragma warning( disable : 4477 )
+#pragma warning( disable : 4313 )
 int enumerateUsers( int argc,
-	char* argv )
+	wchar_t* argv )
 {
 	LPUSER_INFO_0 pBuf = nullptr;
 	LPUSER_INFO_0 pTmpBuf;
@@ -181,8 +259,8 @@ int enumerateUsers( int argc,
 		fwprintf( stderr, L"Usage: %s [\\\\ServerName]\n", argv[0] );
 		exit( 1 );
 	}
+
 	// The server is not the default local computer.
-	//
 	if ( argc == 2 )
 	{
 		pszServerName =  (LPTSTR) argv[1];
@@ -203,22 +281,22 @@ int enumerateUsers( int argc,
 		// If the call succeeds,
 		if ( ( nStatus == NERR_Success ) || ( nStatus == ERROR_MORE_DATA ) )
 		{
-			if ( (pTmpBuf = pBuf) != nullptr )
+			if ( ( pTmpBuf = pBuf ) != nullptr )
 			{
 				// Loop through the entries.
-				for (i = 0; (i < dwEntriesRead); i++)
+				for ( i = 0; i < dwEntriesRead; i++ )
 				{
 					ASSERT( pTmpBuf, "pTmpBuf is nullptr!");
 
-					if (pTmpBuf == nullptr)
+					if ( pTmpBuf == nullptr )
 					{
-						fprintf(stderr, "An access violation has occurred\n");
+						fprintf( stderr, "An access violation has occurred\n" );
 						break;
 					}
 					//
 					//  Print the name of the user account.
 					//
-					wprintf(L"\t-- %s\n", pTmpBuf->usri0_name);
+					wprintf( L"\t-- %s\n", pTmpBuf->usri0_name );
 
 					pTmpBuf++;
 					dwTotalCount++;
@@ -238,20 +316,22 @@ int enumerateUsers( int argc,
 	// Continue to call NetUserEnum while 
 	//  there are more entries. 
 	// 
-	while (nStatus == ERROR_MORE_DATA); // end do
-	//
+	while ( nStatus == ERROR_MORE_DATA );
+
 	// Check again for allocated memory.
-	//
 	if ( pBuf )
-		NetApiBufferFree(pBuf);
-	//
+	{
+		NetApiBufferFree( pBuf );
+	}
+	
 	// Print the final count of users enumerated.
-	//
-	fprintf(stderr, "\nTotal of %d entries enumerated\n", dwTotalCount);
+	fprintf( stderr, "\nTotal of %d entries enumerated\n", dwTotalCount );
 
 	std::system( "pause" );
 	return EXIT_SUCCESS;
 }
+#pragma warning( default : 4313 )
+#pragma warning( default : 4477 )
 
 void getUserGroups()
 {
@@ -261,7 +341,6 @@ void getUserGroups()
 		&size );
 
 	printf( "User: %S\n", user );
-
 	printf( "Local groups: \n" );
 
 	LPBYTE buffer;
@@ -278,11 +357,11 @@ void getUserGroups()
 		&total_entries );
 
 	LOCALGROUP_USERS_INFO_0 *groups = (LOCALGROUP_USERS_INFO_0*)buffer;
-	for ( int i=0; i<entries; i++ )
+	for ( DWORD i = 0; i < entries; i++ )
 	{
 		printf( "\t%S\n", groups[i].lgrui0_name );
 	}
-	NetApiBufferFree(buffer);
+	NetApiBufferFree( buffer );
 
 	printf( "Global groups: \n" );
 
@@ -295,7 +374,7 @@ void getUserGroups()
 		&total_entries );
 
 	GROUP_USERS_INFO_0* ggroups = (GROUP_USERS_INFO_0*)buffer;
-	for ( int i=0; i<entries; i++ )
+	for ( DWORD i = 0; i < entries; ++i )
 	{
 		printf( "\t%S\n", ggroups[i].grui0_name );
 	}
@@ -304,46 +383,63 @@ void getUserGroups()
 
 /*
 Each application that requires the administrator access token must prompt the administrator for consent. The one exception is the relationship that exists between parent and child processes. Child processes inherit the user access token from the parent process. Both the parent and child processes, however, must have the same integrity level. Windows Server 2012 protects processes by marking their integrity levels. Integrity levels are measurements of trust. A "high" integrity application is one that performs tasks that modify system data, such as a disk partitioning application, while a "low" integrity application is one that performs tasks that could potentially compromise the operating system, such as a Web browser. Applications with lower integrity levels cannot modify data in applications with higher integrity levels. When a standard user attempts to run an application that requires an administrator access token, UAC requires that the user provide valid administrator credentials.
-*/
+
 //SECURITY_MANDATORY_UNTRUSTED_RID == 0x00000000L
 //SECURITY_MANDATORY_LOW_RID == 0x00001000L
 //SECURITY_MANDATORY_MEDIUM_RID == 0x00002000L
 //SECURITY_MANDATORY_HIGH_RID == 0x00003000L
 //SECURITY_MANDATORY_SYSTEM_RID == 0x00004000L
 //SECURITY_MANDATORY_PROTECTED_PROCESS_RID == 0x00005000L
-/*
-DWORD getProcessIntegrityLevel()
+*/
+std::pair<DWORD, std::string> getProcessIntegrityLevel( HANDLE h = nullptr )
 {
-	if ( GetTokenInformation( hToken, TokenIntegrityLevel, pTIL,
-		dwLengthNeeded, &dwLengthNeeded ) )
+	HANDLE hToken;
+	if ( !h )
+	{
+		hToken = GetCurrentThreadEffectiveToken();
+	}
+	else
+	{
+		hToken = h;
+	}
+	TOKEN_MANDATORY_LABEL tokenInformation;	// specifies the mandatory integrity level for a token
+	DWORD dwLengthNeeded;
+	DWORD dwIntegrityLevel;
+	HRESULT hres;
+
+	int ret = GetTokenInformation( hToken,
+		TokenIntegrityLevel,
+		&tokenInformation,
+		dwLengthNeeded,
+		&dwLengthNeeded );
+	ASSERT_HRES_WIN32_IF_FAILED( hres );
+	if ( ret )
 	 {
-		dwIntegrityLevel = *GetSidSubAuthority(pTIL->Label.Sid, (DWORD)(UCHAR)(*GetSidSubAuthorityCount(pTIL->Label.Sid)-1));
-		
+		dwIntegrityLevel = *GetSidSubAuthority( tokenInformation.Label.Sid,
+			(DWORD)(UCHAR)( *GetSidSubAuthorityCount( tokenInformation.Label.Sid ) - 1 ) );
+		ASSERT_HRES_WIN32_IF_FAILED( hres );
+
 		if ( dwIntegrityLevel == SECURITY_MANDATORY_LOW_RID )
 		{
-			// Low Integrity
-			wprintf(L"Low Process");
+			return {dwIntegrityLevel, "Low"};
 		}
 		else if ( dwIntegrityLevel >= SECURITY_MANDATORY_MEDIUM_RID
 			&& dwIntegrityLevel < SECURITY_MANDATORY_HIGH_RID )
 		{
-			// Medium Integrity
-			wprintf(L"Medium Process");
+			return {dwIntegrityLevel, "Medium"};
 		}
 		else if ( dwIntegrityLevel >= SECURITY_MANDATORY_HIGH_RID
 			&& dwIntegrityLevel < SECURITY_MANDATORY_SYSTEM_RID )
 		{
-			// High Integrity
-			wprintf(L"High Integrity Process");
+			return {dwIntegrityLevel, "High"};
 		}
 		else if ( dwIntegrityLevel >= SECURITY_MANDATORY_SYSTEM_RID )
 		{
-			// System Integrity
-			wprintf(L"System Integrity Process");
+			return {dwIntegrityLevel, "System"};
 		}
 	}
+	return {0, "Unknown"};
 }
-*/
 
 // is process running with administrative rights
 DWORD isProcessElevated()
@@ -500,106 +596,335 @@ bool isUserAnAdmin()
 	return b;
 }
 
-/*
-#pragma comment(lib, "user32.lib")
-
-class Systeminfo final
+// For systems with < 64 CPUs - otherwise set processor group with SetThreadIdealProcessorEx
+DWORD pinThreadToCore( HANDLE hThread,
+	DWORD core )
 {
-public:
-	Systeminfo();
-	Systeminfo( const Systeminfo& rhs ) = delete;
-	Systeminfo& operator=( const Systeminfo& rhs ) = delete;
+	DWORD previousPreferredCore = SetThreadIdealProcessor( hThread,
+		4 );
+	return previousPreferredCore;
+}
+
+enum class NTTHREAD_INFO
+{
+	ThreadBasicInformation = 0x00,
+	ThreadTimes,
+	ThreadPriority,
+	ThreadBasePriority,
+	ThreadAffinityMask,
+	ThreadImpersonationToken,
+	ThreadDescriptorTableEntry,
+	ThreadEnableAlignmentFaultFixup,
+	ThreadEventPair_Reusable,
+	ThreadQuerySetWin32StartAddress,
+	/*unknown, 3.10 only*/
+	ThreadZeroTlsCell,
+	ThreadPerformanceCount,
+	ThreadAmILastThread,
+	ThreadIdealProcessor,
+	ThreadPriorityBoost,
+	ThreadSetTlsArrayAddress,
+	ThreadIsIoPending,
+	ThreadHideFromDebugger,
+	ThreadBreakOnTermination,
+	ThreadSwitchLegacyState,
+	ThreadIsTerminated,
+	ThreadLastSystemCall,
+	ThreadIoPriority,
+	ThreadCycleTime,
+	ThreadPagePriority,
+	ThreadActualBasePriority,
+	ThreadTebInformation,
+	ThreadCSwitchMon,
+	ThreadCSwitchPmu,
+	ThreadWow64Context,
+	ThreadGroupInformation,
+	ThreadUmsInformation,
+	ThreadCounterProfiling,
+	ThreadIdealProcessorEx,
+	ThreadCpuAccountingInformation,
+	ThreadSuspendCount,
+	/* NT 10 and higher ...
+	ThreadHeterogeneousCpuPolicy,
+	ThreadContainerId,
+	ThreadNameInformation,
+	ThreadSelectedCpuSets,
+	ThreadSystemThreadInformation,
+	ThreadActualGroupAffinity*/
+};
+
+// demo threadMain
+DWORD WINAPI threadMain( LPVOID p )
+{
+	while ( true )
+	{
+		if ( IsDebuggerPresent() )
+		{
+			//__debugbreak();
+		}
+	}
+	return 0;
+}
+
+bool hideThreadFromDebugger( HANDLE hThread = nullptr )
+{
+	HRESULT hres;
+	KeyConsole& console = KeyConsole::getInstance();
+	DWORD tid = 0;
+
+	if ( !hThread )
+	{
+		hThread = CreateThread( nullptr,
+			0,
+			threadMain,
+			nullptr,
+			0,
+			&tid );
+	}
+
+	HMODULE hDLL = LoadLibraryW( TEXT( "ntdll.dll" ) );
+	ASSERT_HRES_WIN32_IF_FAILED( hres );
+
+	using SetInformationThread_t = NTSTATUS (WINAPI *)( HANDLE, NTTHREAD_INFO, PVOID, ULONG );
+	using QueryInformationThread_t = NTSTATUS (WINAPI *)( HANDLE, NTTHREAD_INFO, PVOID, ULONG, PULONG );
+
+	SetInformationThread_t pSetInformationThread = (SetInformationThread_t) GetProcAddress( hDLL,
+		"NtSetInformationThread" );
+	ASSERT_HRES_WIN32_IF_FAILED( hres );
+	QueryInformationThread_t pQueryInformationThread = (QueryInformationThread_t) GetProcAddress( hDLL,
+		"NtQueryInformationThread" );
+	ASSERT_HRES_WIN32_IF_FAILED( hres );
+
+	NTTHREAD_INFO infoClass = NTTHREAD_INFO::ThreadHideFromDebugger;	// thread information class to be set/queried
+	DWORD infoHidden = 2u;	// thread information value to be set/queried
+	int ret = -1;
+	DWORD len = 0;
 	
-	const std::string getFamily() const noexcept;
-	const std::string getManufacturer() const noexcept;
-	const std::string getProductName() const noexcept;
-	const std::string getSerialNumber() const noexcept;
-	const std::string getSku() const noexcept;
-	const std::string getUuid() const noexcept;
-	const std::string getVersion() const noexcept;
+	// TODO: error - information record length is erroneous
+	ret = pSetInformationThread( hThread,
+		infoClass,
+		&infoHidden,
+		sizeof DWORD );
+	ASSERT_NTSTATUS_IF_FAILED( ret );
+	ret = pQueryInformationThread( hThread,
+		infoClass,
+		&infoHidden,
+		sizeof DWORD,
+		&len );
+	ASSERT_NTSTATUS_IF_FAILED( ret );
 
-	   printf("Hardware information: \n");  
-   printf("  OEM ID: %u\n", siSysInfo.dwOemId);
-   printf("  Number of processors: %u\n", 
-	  siSysInfo.dwNumberOfProcessors); 
-   printf("  Page size: %u\n", siSysInfo.dwPageSize); 
-   printf("  Processor type: %u\n", siSysInfo.dwProcessorType); 
-   printf("  Minimum application address: %lx\n", 
-	  siSysInfo.lpMinimumApplicationAddress); 
-   printf("  Maximum application address: %lx\n", 
-	  siSysInfo.lpMaximumApplicationAddress); 
-   printf("  Active processor mask: %u\n", 
-	  siSysInfo.dwActiveProcessorMask); 
-private:
-	std::string m_family;
-	std::string m_manufacturer;
-	std::string m_productName;
-	std::string m_serialNumber;
-	std::string m_sku;
-	std::string m_uuid;
-	std::string m_version;
-};*/
+	using namespace std::string_literals;
+	console.print( "Thread "s + ( infoHidden == 1 ? "is"s : "is not"s ) + " hidden.\n"s );
 
-void memcpyProtectedMemory( void* p,
-	char* value,
+	WaitForSingleObject( hThread,
+		INFINITE );
+	ASSERT_HRES_WIN32_IF_FAILED( hres );
+
+	return true;
+}
+
+void RetrieveCallstack( HANDLE hThread )
+{
+	/*
+	STACKFRAME64 stack{};
+	// Initialize 'stack' with some required stuff.
+	StackWalk64( IMAGE_FILE_MACHINE_I386,
+		m_cProcessInfo.hProcess,
+		hThread,
+		&stack,
+		&context,
+		_ProcessMemoryReader,
+		SymFunctionTableAccess64,
+		SymGetModuleBase64,
+		0 );*/
+}
+
+// typically used with true to suspend all other threads in the current process,
+//	perform some critical modifications and then resume them (call again with false)
+void setSuspendOtherThreads( bool bSuspend )
+{
+	HANDLE hSnapshot = CreateToolhelp32Snapshot( TH32CS_SNAPTHREAD,
+		0 );
+	if ( hSnapshot != INVALID_HANDLE_VALUE )
+	{
+		THREADENTRY32 te;
+		te.dwSize = sizeof THREADENTRY32;
+		Thread32First( hSnapshot,
+			&te );
+		HRESULT hres;
+		ASSERT_HRES_WIN32_IF_FAILED( hres );
+		do
+		{
+			if ( te.dwSize >= ( offsetof( THREADENTRY32, th32OwnerProcessID ) + sizeof DWORD )
+				&& te.th32OwnerProcessID == GetCurrentProcessId()
+				&& te.th32ThreadID != GetCurrentThreadId() )
+			{
+
+				HANDLE hThread = ::OpenThread( THREAD_ALL_ACCESS,
+					FALSE,
+					te.th32ThreadID );
+				if ( hThread != nullptr )
+				{
+					if ( bSuspend )
+					{
+						SuspendThread( hThread );
+					}
+					else
+					{
+						ResumeThread( hThread );
+					}
+					CloseHandle( hThread );
+				}
+			}
+		} while ( Thread32Next( hSnapshot, &te ) );
+
+	}
+}
+
+// you can only change the protection of an entire not a portion of it
+void writeProtectedMemory( void* p,
+	char* pData,
 	int nBytes )
 {
+	HRESULT hres;
 	DWORD oldProtection;
 	
 	VirtualProtect( p,
 		nBytes,
 		PAGE_EXECUTE_READWRITE,
 		&oldProtection );
+	ASSERT_HRES_WIN32_IF_FAILED( hres );
 
-	memcpy( p, value, nBytes );
+	memcpy( p, pData, nBytes );
 
 	// restore page to its former status
 	VirtualProtect( p,
 		nBytes,
 		oldProtection,
 		nullptr );
+	ASSERT_HRES_WIN32_IF_FAILED( hres );
 }
 
-MODULEINFO getModuleInfo( const char* szModule )
+void zwEmumProcessModules( DWORD pid )
 {
-	MODULEINFO moduleInfo{};
-	HMODULE hModule = GetModuleHandleA( szModule );
-	if ( hModule == nullptr )
+	struct NTUNICODE_STRING
 	{
-		return moduleInfo;
+		USHORT Length;
+		USHORT MaximumLength;
+		PWSTR Buffer;
+	};
+	
+	enum MEMORY_INFORMATION
+	{
+		MemoryBasicInformation,
+		MemoryWorkingSetList,
+		MemorySectionName
+	};
+	
+	struct FUNCTION_INFORMATION
+	{
+		char name[64];
+		ULONG_PTR VirtualAddress;
+	};
+	
+	struct MODULE_INFORMATION
+	{
+		PVOID BaseAddress;
+		PVOID AllocationBase;
+		DWORD AllocationProtect;
+		SIZE_T RegionSize;
+		DWORD State;
+		DWORD Protect;
+		DWORD Type;
+		WCHAR szPathName[MAX_PATH];
+		PVOID EntryAddress;
+		FUNCTION_INFORMATION* Functions;
+		DWORD FunctionCount;
+		DWORD SizeOfImage;
+	};
+
+	using TZwQueryVirtualMemory = LONG (WINAPI *)( HANDLE ProcessHandle,
+		PVOID BaseAddress,
+		MEMORY_INFORMATION MemoryInformationClass,
+		PVOID MemoryInformation,
+		ULONG MemoryInformationLength,
+		PULONG ReturnLength );
+ 
+	HRESULT hres;
+	HANDLE hModuleSnap = CreateToolhelp32Snapshot( TH32CS_SNAPMODULE,
+		pid );
+	ASSERT_HRES_WIN32_IF_FAILED( hres );
+ 
+	HANDLE hProc = OpenProcess( PROCESS_ALL_ACCESS,
+		FALSE,
+		pid );
+ 
+	MODULEENTRY32W me32;
+	BYTE szBuffer[MAX_PATH * 2 + 4]{};
+	WCHAR szModuleName[MAX_PATH]{};
+	WCHAR szPathName[MAX_PATH]{};
+	MEMORY_BASIC_INFORMATION mbi;
+	MODULE_INFORMATION mi;
+	PUNICODE_STRING usSectionName;
+	ULONG_PTR dwStartAddr;
+	me32.dwSize = sizeof MODULEENTRY32W;
+ 
+	TZwQueryVirtualMemory fnZwQueryVirtualMemory;
+	fnZwQueryVirtualMemory = (TZwQueryVirtualMemory)::GetProcAddress( GetModuleHandleA( "ntdll.dll" ),
+		"ZwQueryVirtualMemory" );
+ 
+	Module32FirstW( hModuleSnap,
+		&me32 );
+	ASSERT_HRES_WIN32_IF_FAILED( hres );
+
+	dwStartAddr = (ULONG_PTR)me32.modBaseAddr;
+	if ( hProc && fnZwQueryVirtualMemory )
+	{
+		if ( fnZwQueryVirtualMemory( hProc, (PVOID)dwStartAddr, MemoryBasicInformation, &mbi, sizeof( mbi ), nullptr ) >= 0 )
+		{
+			if ( mbi.Type == MEM_IMAGE )
+			{
+				if ( fnZwQueryVirtualMemory( hProc, (PVOID)dwStartAddr, MemorySectionName, szBuffer, sizeof szBuffer, nullptr ) >= 0 )
+				{
+					memset( &mi, 0, sizeof MODULE_INFORMATION );
+					memcpy( &mi, &mbi, sizeof MEMORY_BASIC_INFORMATION );
+					usSectionName = (PUNICODE_STRING)szBuffer;
+					wcsncpy_s( szModuleName, usSectionName->Buffer, usSectionName->Length / sizeof WCHAR );
+					szModuleName[usSectionName->Length / sizeof(WCHAR)] = UNICODE_NULL;
+					printf( "%S\n",usSectionName->Buffer );
+				}
+			}
+		}
 	}
-	GetModuleInformation( GetCurrentProcess(),
-		hModule,
-		&moduleInfo,
-		sizeof MODULEINFO );
-	return moduleInfo;
+	while ( Module32NextW( hModuleSnap, &me32 ) )
+	{
+		dwStartAddr = (ULONG_PTR)me32.modBaseAddr;
+		if ( hProc && fnZwQueryVirtualMemory )
+		{
+			if ( fnZwQueryVirtualMemory( hProc, (PVOID)dwStartAddr, MemoryBasicInformation, &mbi, sizeof mbi, nullptr ) >= 0 )
+			{
+				if ( mbi.Type == MEM_IMAGE )
+				{
+					if ( fnZwQueryVirtualMemory( hProc, (PVOID)dwStartAddr, MemorySectionName, szBuffer, sizeof szBuffer, nullptr ) >= 0 )
+					{
+						memset( &mi, 0, sizeof MODULE_INFORMATION );
+						memcpy( &mi, &mbi, sizeof MEMORY_BASIC_INFORMATION );
+						usSectionName = (PUNICODE_STRING)szBuffer;
+						printf( "%S\n", usSectionName->Buffer );
+					}
+				}
+			}
+		}
+	}
 }
 
-// eg. title = "calculator"
+// eg. title = "Calculator"
 HWND getWindowByTitle( const std::string& title )
 {
 	return FindWindowW( nullptr,
 		util::s2ws( title ).data() );
 }
 
-
-bool isProcess64bit( HANDLE handle )
-{
-	int bWow64 = false;
-	IsWow64Process( handle,
-		&bWow64 );
-
-	if ( bWow64 )
-	{
-		return false;
-	}
-	else
-	{
-		SYSTEM_INFO sysInfo;
-		GetSystemInfo( &sysInfo );
-		return sysInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM64;
-	}
-}
 
 struct WindowData
 {
@@ -628,7 +953,7 @@ BOOL CALLBACK enumWindowsCallback( HWND handle,
 	return false;
 }
 
-HWND fetchMainWindow( unsigned pid )
+HWND getProcessMainWindow( unsigned pid )
 {
 	WindowData wd;
 	wd.m_pid = pid;
@@ -638,9 +963,8 @@ HWND fetchMainWindow( unsigned pid )
 	return wd.m_hWnd;
 }
 
-
-HMODULE getProcessHandleByExecutableName( DWORD pid,
-	const std::wstring& exeName )
+HMODULE getProcessHandle_impl( DWORD pid,
+	const std::wstring& procName )
 {
 	HRESULT hres;
 	wchar_t szTestedProcessName[MAX_PATH] = L"<unknown>";
@@ -652,19 +976,19 @@ HMODULE getProcessHandleByExecutableName( DWORD pid,
 	HMODULE hModule;
 	if ( hProcess != nullptr)
 	{
-		DWORD nBytesRequired;
+		DWORD nBytesWritten = 0;
 
 		if ( EnumProcessModulesEx( hProcess,
 			&hModule,
 			sizeof hModule,
-			&nBytesRequired,
+			&nBytesWritten,
 			LIST_MODULES_32BIT | LIST_MODULES_64BIT ) )
 		{
 			GetModuleBaseNameW( hProcess,
 				hModule,
 				szTestedProcessName,
 				sizeof( szTestedProcessName ) / sizeof( char ) );
-			if ( !_wcsicmp( exeName.c_str(), szTestedProcessName ) )
+			if ( !_wcsicmp( procName.c_str(), szTestedProcessName ) )
 			{
 				CloseHandle( hProcess );
 				return hModule;
@@ -675,7 +999,8 @@ HMODULE getProcessHandleByExecutableName( DWORD pid,
 	return nullptr;
 }
 
-HMODULE queryProcessHandle( const std::wstring& exeName )
+// eg. Notepad.exe
+HMODULE getProcessHandle( const std::wstring& procName )
 {
 	HRESULT hres;
 	DWORD processes[1024];
@@ -690,10 +1015,10 @@ HMODULE queryProcessHandle( const std::wstring& exeName )
 	DWORD nProcesses = bytesRequired / sizeof( DWORD );
 
 	HMODULE hModule;
-	for ( int i = 0; i < nProcesses; i++ )
+	for ( DWORD i = 0; i < nProcesses; i++ )
 	{
-		hModule = getProcessHandleByExecutableName( processes[i],
-			 exeName );
+		hModule = getProcessHandle_impl( processes[i],
+			procName );
 		if ( hModule )
 		{
 			break;
@@ -725,12 +1050,12 @@ HANDLE getProcessHandleByWindowTitle( const std::wstring& windowTitle,
 		pid );
 	HRESULT hres;
 	ASSERT_HRES_WIN32_IF_FAILED( hres );
-	//listProcessModules( pid );
-	//listProcessThreads( pid );
+	//printProcessModules( pid );
+	//printProcessThreads( pid );
 	return hProc;
 }
 
-bool listProcessModules( DWORD pid )
+bool printProcessModules( DWORD pid )
 {
 	HANDLE hSnapshot = INVALID_HANDLE_VALUE;
 	MODULEENTRY32W moduleEntry{};
@@ -739,7 +1064,6 @@ bool listProcessModules( DWORD pid )
 
 	hSnapshot = CreateToolhelp32Snapshot( TH32CS_SNAPMODULE,
 		pid );
-	ASSERT( hSnapshot != INVALID_HANDLE_VALUE, "Couldn't create snapshot!" );
 	HRESULT hres;
 	ASSERT_HRES_WIN32_IF_FAILED( hres );
 
@@ -764,7 +1088,7 @@ bool listProcessModules( DWORD pid )
 	return true;
 }
 
-bool listProcessThreads( DWORD pid ) 
+bool printProcessThreads( DWORD pid ) 
 { 
 	HANDLE hSnapshot = INVALID_HANDLE_VALUE;
 	THREADENTRY32 threadEntry{};
@@ -773,7 +1097,6 @@ bool listProcessThreads( DWORD pid )
 
 	hSnapshot = CreateToolhelp32Snapshot( TH32CS_SNAPTHREAD,
 		0 );
-	ASSERT( hSnapshot != INVALID_HANDLE_VALUE, "Couldn't create snapshot!" );
 	HRESULT hres;
 	ASSERT_HRES_WIN32_IF_FAILED( hres );
 
@@ -797,7 +1120,7 @@ bool listProcessThreads( DWORD pid )
 	return true;
 }
 
-bool listProcesses()
+bool printProcesses()
 {
 	static HANDLE hProc;
 	PROCESSENTRY32W processEntry{};
@@ -807,7 +1130,6 @@ bool listProcesses()
 
 	HANDLE hSnapshot = CreateToolhelp32Snapshot( TH32CS_SNAPPROCESS,
 		0 );
-	ASSERT( hSnapshot != INVALID_HANDLE_VALUE, "Couldn't create snapshot!" );
 	HRESULT hres;
 	ASSERT_HRES_WIN32_IF_FAILED( hres );
 
@@ -835,6 +1157,95 @@ bool listProcesses()
 
 	CloseHandle( hSnapshot );					// clean the snapshot object
 	return true;
+}
+
+MODULEINFO getModuleInfo( HMODULE hModule )
+{
+	MODULEINFO moduleInfo{};
+	ASSERT( hModule, "hModule is null!" );
+	GetModuleInformation( GetCurrentProcess(),
+		hModule,
+		&moduleInfo,
+		sizeof MODULEINFO );
+	return moduleInfo;
+}
+
+MODULEINFO getModuleInfo( const char* szModule )
+{
+	ASSERT( szModule, "module name is null!" );
+	MODULEINFO moduleInfo{};
+	HMODULE hModule = GetModuleHandleA( szModule );
+	GetModuleInformation( GetCurrentProcess(),
+		hModule,
+		&moduleInfo,
+		sizeof MODULEINFO );
+	return moduleInfo;
+}
+
+// get process dll base address
+HMODULE getProcessModule( HANDLE hProc,
+	const char* szRequestedModuleName )
+{
+	char* requestedModuleNameLowerCase = nullptr;
+	strcpy( requestedModuleNameLowerCase, szRequestedModuleName );
+	_strlwr_s( requestedModuleNameLowerCase,
+		strlen( szRequestedModuleName ) + 1 );
+
+	HMODULE processModules[1024];
+	DWORD nBytesWritten = 0;
+	int ret = EnumProcessModules( hProc,
+		processModules,
+		sizeof( HMODULE ) * 1024,
+		&nBytesWritten );
+	KeyConsole& console = KeyConsole::getInstance();
+	console.log( "The module was not found in the specified process." );
+
+	DWORD nModules = nBytesWritten / sizeof HMODULE;
+	char procName[256];
+	GetModuleFileNameExA( hProc,
+		nullptr,
+		procName,
+		256 );
+	// a null module handle gets the process name
+	_strlwr_s( procName,
+		256 );
+
+	HMODULE hModule = nullptr;
+	for ( DWORD i = 0; i < nModules; ++i )
+	{
+		char moduleName[256];
+		CHAR absoluteModulePath[256];
+		CHAR rebasedPath[256] = { 0 };
+		GetModuleFileNameExA( hProc,
+			processModules[i],
+			moduleName,
+			256 );
+		_strlwr_s( moduleName,
+			256 );
+		char* lastSlash = strrchr( moduleName,
+			'\\' );
+		if ( !lastSlash )
+		{
+			lastSlash = strrchr( moduleName,
+				'/' );
+		}
+		char* dllName = lastSlash + 1;
+		if ( strcmp( dllName, requestedModuleNameLowerCase ) == 0 )
+		{
+			hModule = processModules[i];
+			MODULEINFO moduleInfo = getModuleInfo( processModules[i] );
+
+			return hModule;
+		}
+		// the following string operations are to account for cases where GetModuleFileNameEx
+		// returns a relative path rather than an absolute one, the path we get to the module
+		// is using a virtual drive letter (ie: one created by subst) rather than a real drive
+		char* ret = _fullpath( absoluteModulePath,
+			moduleName,
+			256 );
+		ASSERT( ret, "resolved module path is null!" );
+	}
+	return nullptr;
 }
 
 bool setProcessDebugPrivileges( HANDLE hProc )
@@ -868,41 +1279,134 @@ bool setProcessDebugPrivileges( HANDLE hProc )
 	return true;
 }
 
-#if _WIN64
+// may return Null on failure
+std::vector<BYTE> queryProcessInformation( HANDLE hProc,
+	PROCESSINFOCLASS infoClass = ProcessBasicInformation )
+{
+	using TNtQueryInformationProcess = NTSTATUS( __stdcall * ) ( HANDLE ProcessHandle,
+	PROCESSINFOCLASS ProcessInformationClass, PVOID ProcessInformation,
+	ULONG ProcessInformationLength, PULONG ReturnLength );
+
+	static TNtQueryInformationProcess ntQueryInformationProcess = (TNtQueryInformationProcess)GetProcAddress( GetModuleHandleW( L"ntdll.dll" ),
+		"NtQueryInformationProcess" );
+	if ( ntQueryInformationProcess == nullptr )
+	{
+		return {};
+	}
+
+	std::vector<BYTE> info;
+	ULONG infoLen = 128;	// should be enough
+	info.reserve( infoLen );
+	ULONG retLen;
+
+	NTSTATUS ret = ntQueryInformationProcess( hProc,
+		infoClass,
+		info.data(),
+		infoLen,
+		&retLen );
+	ASSERT_NTSTATUS_IF_FAILED( ret );
+	ASSERT( info.size() >= 4, "Process information vector is empty!" );
+	return info;
+}
+
+//===================================================
+//	\function	getPeb
+//	\brief  Process Environment Block
+//			https://docs.microsoft.com/en-us/windows/win32/api/winternl/ns-winternl-peb
+//	\date	2021/08/29 1:05
+PPEB getPeb()
+{
+	static PPEB pPeb;
+	thread_local PTEB pTeb;
+#if defined _WIN64 || defined _M_X64
+	pTeb = reinterpret_cast<PTEB>( __readgsqword( reinterpret_cast<UINT64>( &static_cast<NT_TIB*>( nullptr )->Self ) ) );
+#else
+	pTeb = reinterpret_cast<PTEB>( __readfsdword( reinterpret_cast<UINT64>( &static_cast<NT_TIB*>( nullptr )->Self ) ) );
+#endif
+	pPeb = pTeb->ProcessEnvironmentBlock;
+	return pPeb;
+}
+
+PTEB getTeb()
+{
+	thread_local PTEB pTeb;
+#if defined _WIN64 || defined _M_X64
+	pTeb = reinterpret_cast<PTEB>( __readgsqword( reinterpret_cast<UINT64>( &static_cast<NT_TIB*>( nullptr )->Self ) ) );
+#else
+	pTeb = reinterpret_cast<PTEB>( __readfsdword( reinterpret_cast<UINT64>( &static_cast<NT_TIB*>( nullptr )->Self ) ) );
+#endif
+	return pTeb;
+}
+
+#if defined _WIN64 || defined __x86_64__ || defined __ppc64__
 // If GetModuleHandle is hooked this won't work
 HANDLE getCurrentProcessBaseAddress()
 {
-	return GetModuleHandle( nullptr );
+#	ifdef THIS_INSTANCE
+	return THIS_INSTANCE;
+#	else
+	const PPEB pPeb = reinterpret_cast<PPEB>( __readgsqword( 0x60 ) );
+	return pPeb->Reserved3[1];
+#	endif
 }
 #else
 HANDLE getCurrentProcessBaseAddress()
 {
+#	ifdef THIS_INSTANCE
+	return THIS_INSTANCE;
+#	else
 	const PPEB pPeb = reinterpret_cast<PPEB>( __readfsdword( 0x30 ) );
 	return pPeb->Reserved3[1];
+#	endif
 }
 #endif
 
-HMODULE getProcessBaseAddress( const std::wstring& windowTitle,
-	const std::wstring& exeName )
+HMODULE getModuleBaseAddress( HANDLE hProc,
+	const std::wstring& modName )
 {
-	const auto hProc = getProcessHandleByWindowTitle( windowTitle,
-		 PROCESS_VM_READ | PROCESS_QUERY_INFORMATION );
-
-	HMODULE hModules[1024];
-	DWORD requiredBytes;
-	if ( EnumProcessModules( hProc, hModules, sizeof( hModules ), &requiredBytes ) )
+	HMODULE modules[1024];
+	DWORD nBytesWritten;
+	if ( EnumProcessModules( hProc, modules, sizeof( modules ), &nBytesWritten ) )
 	{
-		const DWORD nModules = requiredBytes / sizeof( HMODULE );
+		const DWORD nModules = nBytesWritten / sizeof( HMODULE );
 		for ( unsigned i = 0; i < nModules; ++i )
 		{
 			TCHAR szModuleName[MAX_PATH];
 			const DWORD nChars = sizeof( szModuleName ) / sizeof( TCHAR );
-			if ( GetModuleFileNameEx( hProc, hModules[i], szModuleName, nChars ) )
+			if ( GetModuleFileNameEx( hProc, modules[i], szModuleName, nChars ) )
 			{
-				const std::wstring moduleName = szModuleName;
-				if ( moduleName.find( exeName ) != std::string::npos )
+				const std::wstring moduleName{szModuleName};
+				if ( moduleName.find( modName ) != std::string::npos )
 				{
-					return hModules[i];
+					return modules[i];
+				}
+			}
+		}
+	}
+	return nullptr;
+}
+
+HMODULE getModuleBaseAddress( const std::wstring& windowTitle,
+	const std::wstring& modName )
+{
+	const auto hProc = getProcessHandleByWindowTitle( windowTitle,
+		 PROCESS_VM_READ | PROCESS_QUERY_INFORMATION );
+
+	HMODULE modules[1024];
+	DWORD nBytesWritten;
+	if ( EnumProcessModules( hProc, modules, sizeof( modules ), &nBytesWritten ) )
+	{
+		const DWORD nModules = nBytesWritten / sizeof( HMODULE );
+		for ( unsigned i = 0; i < nModules; ++i )
+		{
+			TCHAR szModuleName[MAX_PATH];
+			const DWORD nChars = sizeof( szModuleName ) / sizeof( TCHAR );
+			if ( GetModuleFileNameEx( hProc, modules[i], szModuleName, nChars ) )
+			{
+				const std::wstring moduleName{szModuleName};
+				if ( moduleName.find( modName ) != std::string::npos )
+				{
+					return modules[i];
 				}
 			}
 		}
@@ -940,80 +1444,127 @@ std::size_t writeProcessMemory( HANDLE hProc,
 	return bytesWritten;
 }
 
+void spawnProcess( LPCWSTR programPath )
+{
+	HRESULT hres;
+	STARTUPINFOW si;	// set various window & thread properties
+	ZeroMemory( &si, sizeof STARTUPINFOW );
+	PROCESS_INFORMATION pi;
+	ZeroMemory( &pi, sizeof PROCESS_INFORMATION );
+	si.cb = sizeof STARTUPINFOW ;
+
+	int ret = CreateProcessW( programPath,
+		nullptr,				// command line to be executed
+		nullptr,				// process handle not inheritable
+		nullptr,				// thread handle not inheritable
+		false,					// no handle inheritance
+		0,						// creation flags
+		nullptr,				// use parent's environment block
+		nullptr,				// use parent's starting directory 
+		&si,
+		&pi );
+	ASSERT_HRES_WIN32_IF_FAILED( hres );
+
+	WaitForSingleObject( pi.hProcess,
+		INFINITE );
+	ASSERT_HRES_WIN32_IF_FAILED( hres );
+	
+	CloseHandle( pi.hProcess );
+	CloseHandle( pi.hThread );
+}
+
 //////////////////////////////////////////////////////////////////////
 void tests()
 {
 	const std::wstring targetWindowTitle = L"Calculator";
-	const std::wstring targetExe = L"calc.exe";
-	const auto procBaseAddr = getProcessBaseAddress( targetWindowTitle,
-		targetExe );
+	const std::wstring procName = L"calc.exe";
+	const auto procBaseAddr = getModuleBaseAddress( targetWindowTitle,
+		procName );
 	if ( !procBaseAddr )
 	{
 		std::cout << "Process not found!\n";
 	}
 	std::cout << procBaseAddr
 		<< '\n';
-
+	
 	std::cout << "getCurrentProcessBaseAddress:"
 		<< '\n';
 	std::cout << getCurrentProcessBaseAddress()
 		<< '\n';
 	std::cout << THIS_INSTANCE
 		<< '\n';
+	
+	std::cout << "queryProcessHandle\n";
+	getProcessHandle( L"Stopwatch.exe" );
+	
+	auto ret = getProcessIntegrityLevel();
+	if ( ret.first != 0 )
+	{
+		KeyConsole& console = KeyConsole::getInstance();
+		console.print( ret.second );
+	}
+	
+	spawnProcess( L"C:\\Windows\\System32\\calc.exe" );
 
-	queryProcessHandle( L"Stopwatch.exe" );
+	hideThreadFromDebugger();
 }
 //////////////////////////////////////////////////////////////////////
 
-#pragma comment( linker, "/SUBSYSTEM:WINDOWS" )
 
 int WINAPI wWinMain( HINSTANCE hInst,
 	HINSTANCE hPrevInstance,
 	wchar_t* szConsole,
 	int nShowCmd )
 {
-	//tests();
-
-	DWORD* pAmmo = reinterpret_cast<DWORD*>( 0x00e0db44 );	// RVA of ammo in COD4
-	DWORD readAmmo = 0;
-	SIZE_T bytesRead = 0;
-	int desiredAmmo;
-	SIZE_T bytesWritten = 0;
-
-	std::wstring processName{L"Call of Duty 4"};
-	auto szProcessName = processName.c_str();
-
-	HANDLE hProc = getProcessHandleByWindowTitle( processName );
-	if ( !hProc )
+	constexpr const bool bTesting = false;
+	
+	if ( bTesting )
 	{
-		help();
-		return -1;
+		tests();
 	}
-	std::cout << "We have access.\n";
-
-	// now that we have access to the process you can do whatever you want with it..
-
-	// read and display ammo value every second
-	while ( !( GetAsyncKeyState( VK_F9 ) & 1 ) )
+	else
 	{
-		readAmmo = readProcessMemory<DWORD>( hProc,
-			pAmmo );
+		// Change ammo value in COD4
+		DWORD* pAmmo = reinterpret_cast<DWORD*>( 0x00e0db44 );	// RVA of ammo in COD4
+		DWORD readAmmo = 0;
+		SIZE_T bytesRead = 0;
+		int desiredAmmo;
+		SIZE_T bytesWritten = 0;
+
+		std::wstring windowTitle{L"Call of Duty 4"};
+		auto szWindowTitle = windowTitle.c_str();
+
+		HANDLE hProc = getProcessHandleByWindowTitle( windowTitle );
+		if ( !hProc )
+		{
+			help();
+			return -1;
+		}
+		std::cout << "We have access.\n";
+
+		// now that we have access to the process you can do whatever you want with it..
+
+		// read and display ammo value every second
+		while ( !( GetAsyncKeyState( VK_F9 ) & 1 ) )
+		{
+			readAmmo = readProcessMemory<DWORD>( hProc,
+				pAmmo );
+			KeyConsole& console = KeyConsole::getInstance();
+			console.print( std::to_string( readAmmo ) + '\n' );
+			Sleep( 1000 );
+		}
+
+		// overwrite the value for funzies
+		std::cout << "How much ammo do you want to have?\n";
 		KeyConsole& console = KeyConsole::getInstance();
-		console.print( std::to_string( readAmmo ) + '\n' );
-		Sleep( 1000 );
+		std::string ammoStr = console.read( 8 );
+		desiredAmmo = std::atoi( ammoStr.c_str() );
+		console.print( "you typed = " + std::to_string( desiredAmmo ) );
+		bytesWritten = writeProcessMemory( hProc,
+			pAmmo,
+			desiredAmmo );
 	}
 
-	// overwrite the value for funzies
-	std::cout << "How much ammo do you want to have?\n";
-	KeyConsole& console = KeyConsole::getInstance();
-	std::string ammoStr = console.read( 8 );
-	desiredAmmo = std::atoi( ammoStr.c_str() );
-	console.print( "you typed = " + std::to_string( desiredAmmo ) );
-	bytesWritten = writeProcessMemory( hProc,
-		pAmmo,
-		desiredAmmo );
-
-	console.resetInstance();
-	std::system( "pause" );
+	KeyConsole::getInstance().resetInstance();
 	return 0;
 }

@@ -2,11 +2,7 @@
 #include "utils.h"
 #include "assertions_console.h"
 #include <fstream>
-#include <VersionHelpers.h>
-#include <psapi.h>
 #include <thread>
-
-#pragma comment( lib, "psapi.lib" )
 
 
 namespace util
@@ -31,7 +27,7 @@ std::string getLastErrorAsString()
 	DWORD errorMsgId = ::GetLastError();
 	if ( errorMsgId == 0 )
 	{
-		return std::string{""};
+		return "";
 	}
 
 	LPSTR buff = nullptr;
@@ -44,167 +40,35 @@ std::string getLastErrorAsString()
 		0,
 		nullptr );
 
-	std::string message( buff,
-		messageLength );
+	std::string message;
+	message.assign( buff, messageLength );
+	// free the buffer allocated by the system
 	LocalFree( buff );
 	return message;
 }
 
-void getSystemVersion()
+std::string getLastNtErrorAsString( DWORD ntStatusCode )
 {
-#if defined _DEBUG && !defined NDEBUG
-	KeyConsole& console = KeyConsole::getInstance();
-	using namespace std::string_literals;
-	if ( IsWindowsXPOrGreater() )
-	{
-		console.print( "XPOrGreater\n"s );
-	}
+	LPSTR ntStatusMessage = nullptr;
+	HMODULE hNtdll = LoadLibraryA( "ntdll.dll" );
+	
+	size_t messageLength = FormatMessageA( FORMAT_MESSAGE_ALLOCATE_BUFFER |
+		FORMAT_MESSAGE_FROM_SYSTEM |
+		FORMAT_MESSAGE_FROM_HMODULE,
+		hNtdll,
+		ntStatusCode,
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+		(LPSTR) &ntStatusMessage,
+		0,
+		nullptr );
 
-	if ( IsWindowsXPSP1OrGreater() )
-	{
-		console.print( "XPSP1OrGreater\n"s );
-	}
-
-	if ( IsWindowsXPSP2OrGreater() )
-	{
-		console.print( "XPSP2OrGreater\n"s );
-	}
-
-	if ( IsWindowsXPSP3OrGreater() )
-	{
-		console.print( "XPSP3OrGreater\n"s );
-	}
-
-	if ( IsWindowsVistaOrGreater() )
-	{
-		console.print( "VistaOrGreater\n"s );
-	}
-
-	if ( IsWindowsVistaSP1OrGreater() )
-	{
-		console.print( "VistaSP1OrGreater\n"s );
-	}
-
-	if ( IsWindowsVistaSP2OrGreater() )
-	{
-		console.print( "VistaSP2OrGreater\n"s );
-	}
-
-	if ( IsWindows7OrGreater() )
-	{
-		console.print( "Windows7OrGreater\n"s );
-	}
-
-	if ( IsWindows7SP1OrGreater() )
-	{
-		console.print( "Windows7SP1OrGreater\n"s );
-	}
-
-	if ( IsWindows8OrGreater() )
-	{
-		console.print( "Windows8OrGreater\n"s );
-	}
-
-	if ( IsWindows8Point1OrGreater() )
-	{
-		console.print( "Windows8Point1OrGreater\n"s );
-	}
-
-	if ( IsWindows10OrGreater() )
-	{
-		console.print( "Windows10OrGreater\n"s );
-	}
-
-	if ( IsWindowsServer() )
-	{
-		console.print( "Server Machine.\n"s );
-	}
-	else
-	{
-		console.print( "Client Machine.\n"s );
-	}
-#endif
-}
-
-int32_t fileExistsWin32( const std::string& path )
-{
-	uint32_t attribs = GetFileAttributesW( s2ws( path ).data() );
-	return ( attribs != INVALID_FILE_ATTRIBUTES
-		&& !( attribs & FILE_ATTRIBUTE_DIRECTORY ) );
-}
-
-int getCpuCount()
-{
-#ifdef _WIN32
-	SYSTEM_INFO sysinfo;
-	GetSystemInfo( &sysinfo );
-	return sysinfo.dwNumberOfProcessors;
-#elif defined __linux__
-	return sysconf( _SC_NPROCESSORS_ONLN );
-#endif
-}
-
-//===================================================
-//	\function	getPeb
-//	\brief  Process & Thread Environment Block
-//			https://docs.microsoft.com/en-us/windows/win32/api/winternl/ns-winternl-peb
-//	\date	2021/08/29 1:05
-PPEB getPeb()
-{
-	// Process Environment Block (TEB)
-	static PPEB pPeb;
-	// Thread Environment Block (TEB)
-	PTEB pTeb;
-#if defined _WIN64 || defined _M_X64
-	pTeb = reinterpret_cast<PTEB>( __readgsqword( reinterpret_cast<DWORD_PTR>( &static_cast<NT_TIB*>( nullptr )->Self ) ) );
-#else
-	pTeb = reinterpret_cast<PTEB>( __readfsdword( reinterpret_cast<DWORD_PTR>( &static_cast<NT_TIB*>( nullptr )->Self ) ) );
-#endif
-
-	// Process Environment Block (PEB)
-	pPeb = pTeb->ProcessEnvironmentBlock;
-	return pPeb;
-}
-
-HMODULE getProcess( DWORD processId,
-	char* processName )
-{
-	char szTestedProcessName[MAX_PATH] = "<unknown>";
-
-	HANDLE hProcess = OpenProcess( PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
-		FALSE,
-		processId );
-
-	HMODULE hModule;
-	if ( hProcess != nullptr)
-	{
-		DWORD cbNeeded;
-
-		if ( EnumProcessModulesEx( hProcess,
-			&hModule,
-			sizeof( hModule ),
-			&cbNeeded,
-			LIST_MODULES_32BIT | LIST_MODULES_64BIT ) )
-		{
-			GetModuleBaseName( hProcess,
-				hModule,
-				util::s2ws( szTestedProcessName ).data(),
-				sizeof( szTestedProcessName ) / sizeof( char ) );
-			if ( !_stricmp( processName, szTestedProcessName ) )
-			{
-				CloseHandle( hProcess );
-				return hModule;
-			}
-		}
-	}
-	CloseHandle( hProcess );
-	return nullptr;
-}
-
-HWND getWindow( const std::string& name )
-{
-	return FindWindowW( nullptr,
-		s2ws( name ).data() );
+	std::string message;
+	message.assign( ntStatusMessage,
+		messageLength );
+	// free the buffer allocated by the system
+	LocalFree( ntStatusMessage );
+	FreeLibrary( hNtdll );
+	return message;
 }
 
 std::wstring bstrToStr( const BSTR& bstr )
@@ -224,41 +88,13 @@ BSTR strToBstr( const std::wstring& str )
 }
 #pragma warning( default : 4267 )
 
-bool isFileBinary( const char* fname )
+__int64 filetimeToInt64( const FILETIME& fileTime )
 {
-	char c;
-	std::ifstream ifs{fname, std::ios::binary};
-	unsigned charsRead = 0;
-	while ( ( c = ifs.get() ) != EOF && charsRead < 255 )
-	{
-		if ( c == '\0' )
-		{
-			return true;
-		}
-		++charsRead;
-	}
-	return false;
+	ULARGE_INTEGER ui64;
+	ui64.LowPart = fileTime.dwLowDateTime;
+	ui64.HighPart = fileTime.dwHighDateTime;
+	return static_cast<__int64>( ui64.QuadPart );
 }
-
-#if defined _DEBUG && !defined NDEBUG
-bool printFile( const char* fname )
-{
-	std::ifstream ifs{fname};
-	KeyConsole& console = KeyConsole::getInstance();
-	if ( !ifs.is_open() )
-	{
-		console.log( "can't open " + std::string{*fname} + "!\n" );
-		return false;
-	}
-	char c;
-	while ( !ifs.eof() )
-	{
-		c = ifs.get();
-		console.print( std::string{c} );
-	}
-	return true;
-}
-#endif
 
 void pinThreadToCore( HANDLE hThread,
 	DWORD core )
@@ -346,8 +182,6 @@ void doAfter( const std::function<void(void)>& f,
 	t.detach();
 }
 
-// advanced Windows 32 base API DLL file that supports security and registry calls
-#pragma comment( lib, "advapi32.lib" )
 std::optional<DWORD> registryGetDword( HKEY hKey,
 	const std::wstring& regName )
 {

@@ -311,6 +311,18 @@ WORD KeyConsole::getConsoleDefaultTextAttributes() const noexcept
 	return m_consoleAttributesDefault;
 }
 
+void KeyConsole::show() const
+{
+	ShowWindow( GetConsoleWindow(),
+		SW_SHOW );
+}
+
+void KeyConsole::hide() const
+{
+	ShowWindow( GetConsoleWindow(),
+		SW_HIDE );
+}
+
 bool KeyConsole::closeConsole()
 {
 	if ( !FreeConsole() )

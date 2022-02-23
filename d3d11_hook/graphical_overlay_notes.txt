@@ -1,0 +1,39 @@
+The goal is creating a screen overlay that we can draw our own stuff on the desired program's window.
+How the hell do we do that without having the source code of the program?
+	Simple (but not easy).
+	Hooking!
+We will hook to a Direct3d function call so we can use that to inject our own code.
+Which function?
+We don't wanna destroy the host application, we just wanna alter it.
+So after it has drawn all its stuff we will draw ours.
+Thus Direct3d9::EndScene or Direct3d11::Present are our ideal functions for this purpose.
+Therefore we will draw all our stuff over the top of the game's graphics.
+This is the idea behind all screen overlays.
+
+Steps:
+Let's use internal hack.
+1. DLL injection (in the usual way).
+2.
+(a) we could do the usual disassembler way to look for the function and/or do signature scanning
+(b) Our way: a better more clever way, is to create our own dummy D3dDevice & Swap Chain,
+		get the correct vtable address of the member function we're looking for and get in there
+We can do this because EndScene/Present is a virtual member function of the
+	Idirect3dDevice9/ID3D11Device interface
+	and hooking its virtual member table is possible since it's always at a fixed address
+
+After hooking:
+Of course we would want to draw our own stuff. We do so in our function.
+After our drawing of choice we call the original EndScene/Present to complete the frame.
+
+So it all comes down to getting the virtual table address and its offset to ::Present
+	from the target process.
+
+1. Find D3D11CreateDeviceAndSwapChain. So create this function with the right type signature
+	and in the function body, load the real d3d11.dll and call the real D3D11CreateDeviceAndSwapChain function.
+2. We will target D3D11CreateDeviceAndSwapChain::Present. It is located at a fixed offset
+	from D3D11CreateDeviceAndSwapChain's vtable address. So it comes down to finding this
+	address.
+
+
+We can create a "proxy" version of a dll and place it to the executable's directory.
+To find such a function we used CFF Explorer.

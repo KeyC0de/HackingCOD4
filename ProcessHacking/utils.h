@@ -1,14 +1,12 @@
 #pragma once
 
-#pragma once
-
 #include <vector>
 #include <string>
+#include <sstream>
 #include <algorithm>
 #include <iterator>
 #include <iostream>
 #include <bitset>
-
 
 #define isOfTypeT( obj, T ) ( dynamic_cast<T*>( obj ) != nullptr ) ? true : false
 
@@ -53,6 +51,8 @@ std::wstring s2ws( const std::string& narrow );
 //	\date	2020/12/30 20:38
 std::string ws2s( const std::wstring& wide );
 
+namespace
+{
 template<class Iter>
 void splitString_impl( const std::string& s,
 	const std::string& delim,
@@ -77,6 +77,7 @@ void splitString_impl( const std::string& s,
 			s.length() - a ) );
 	}
 }
+}
 
 std::vector<std::string> splitString( const std::string& s, const std::string& delim );
 
@@ -98,4 +99,16 @@ void* addPointers( void* p1, void* p2 );
 
 std::string operator+( const std::string_view& sv1, const std::string_view& sv2 );
 
+// print a comma every 3 decimal places
+template<typename T, typename = std::enable_if_t<std::is_arithmetic_v<T>>>
+std::string getNumberString( T num )
+{
+	std::stringstream ss;
+	ss.imbue( std::locale{""} );
+	ss << std::fixed
+		<< num;
+	return ss.str();
 }
+
+
+}//util

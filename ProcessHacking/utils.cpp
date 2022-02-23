@@ -1,9 +1,9 @@
+#include "utils.h"
 #include <locale>
 #include <codecvt>
 #include <sstream>
 #include <iomanip>
 #include <cctype>
-#include "utils.h"
 
 
 namespace util
@@ -119,6 +119,5 @@ std::string operator+( const std::string_view& sv1,
 {
 	return std::string{sv1} + std::string{sv2};
 }
-
 
 }

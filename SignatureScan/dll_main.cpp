@@ -6,7 +6,7 @@
 #include <psapi.h>
 
 
-void memcpyProtectedMemory( void* p,
+void writeProtectedMemory( void* p,
 	char* value,
 	int nBytes )
 {
@@ -83,9 +83,9 @@ bool sigScan( const std::string& exeName,
 		patternLen );
 	if ( desiredAddr == 0xDeadBeef )
 	{
-		MessageBoxA( nullptr,
-			"Signature not found in module.",
-			"Failure!",
+		MessageBoxW( nullptr,
+			L"Signature not found in module.",
+			L"Failure!",
 			MB_OK );
 		return false;
 	}
@@ -93,7 +93,7 @@ bool sigScan( const std::string& exeName,
 	//char szBuffText[1024];
 	//sprintf( szBuffText,
 	//	"Found signature! in module %s\n\bat address dw: %02x", szModuleName, desiredAddr );
-	//MessageBoxA( nullptr,
+	//MessageBoxW( nullptr,
 	//	szBuffText,
 	//	"Success!",
 	//	MB_OK );
@@ -105,7 +105,7 @@ bool sigScan( const std::string& exeName,
 		strcat( replacedOpcode, "\x90" );
 	}
 	// must look like this "\x90\x90\x90\x90\x90\x90\x90";
-	memcpyProtectedMemory( reinterpret_cast<void*>( desiredAddr ),
+	writeProtectedMemory( reinterpret_cast<void*>( desiredAddr ),
 		replacedOpcode,
 		patternLen );
 	delete[] replacedOpcode;
@@ -113,7 +113,7 @@ bool sigScan( const std::string& exeName,
 }
 
 
-int WINAPI DllMain( HINSTANCE hInst,
+int WINAPI DllMain( HINSTANCE hDll,
 	DWORD ulReasonForcall,
 	LPVOID pReserved )
 {
@@ -122,7 +122,7 @@ int WINAPI DllMain( HINSTANCE hInst,
 	case DLL_PROCESS_ATTACH:
 		{
 		bool bResult = false;
-		//MessageBoxA( nullptr,
+		//MessageBoxW( nullptr,
 		//	"dll attached to thread.",
 		//	"Attached",
 		//	MB_OK );
@@ -131,23 +131,29 @@ int WINAPI DllMain( HINSTANCE hInst,
 			"xxx????" );
 		if ( bResult )
 		{
-			MessageBoxA( nullptr,
-				"Replaced opcode!",
-				"Success!",
+			MessageBoxW( nullptr,
+				L"Replaced opcode!",
+				L"Success!",
 				MB_ICONINFORMATION | MB_OK );
 		}
 		else
 		{
-			MessageBoxA( nullptr,
-				"Something went amiss.",
-				"Failure!",
+			MessageBoxW( nullptr,
+				L"Something went amiss.",
+				L"Failure!",
 				MB_ICONERROR | MB_OK );
 		}
 		break;
 	}
 	case DLL_THREAD_ATTACH:
+		break;
 	case DLL_PROCESS_DETACH:
 	case DLL_THREAD_DETACH:
+		// cleanup..
+		MessageBoxW( nullptr,
+			L"Dll successfully unloaded.",
+			L"Exiting..",
+			MB_ICONINFORMATION | MB_OK );
 	default:
 		break;
 	}

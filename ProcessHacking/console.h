@@ -63,6 +63,8 @@ public:
 	bool setColor( WORD attributes = FOREGROUND_RED | BACKGROUND_RED | BACKGROUND_GREEN );
 	WORD getConsoleTextAttributes() const noexcept;
 	WORD getConsoleDefaultTextAttributes() const noexcept;
+	void show() const;
+	void hide() const;
 
 	//===================================================
 	//	\function	print

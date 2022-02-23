@@ -24,7 +24,7 @@ extern bool assertPrint( const char* expr,
 				__FUNCTION__,\
 				msg ) )\
 				{\
-					std::system( "pause" );\
+					__debugbreak();\
 					std::exit( -1 );\
 				}
 
@@ -34,7 +34,7 @@ extern bool assertPrint( const char* expr,
 				__LINE__,\
 				__FUNCTION__ ) )\
 				{\
-					std::system( "pause" );\
+					__debugbreak();\
 					std::exit( -1 );\
 				}
 

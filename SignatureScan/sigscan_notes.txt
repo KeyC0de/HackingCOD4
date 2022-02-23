@@ -1,3 +1,5 @@
+Pattern Scanning
+================
 Goal: We search for instructions in memory to replace with our own to change process behavior to suit our needs.
 
 Pattern Scanning or Signature Scanning is the art of finding a sequence of bytes in memory which matches a sequence of bytes you already identified. You scan the good regions of memory byte by byte looking for the first byte. When the first byte is found, you compare each subsequent byte against the known pattern. If all the bytes are found, your pattern is found. If your comparison for 1 byte fails, you start over at the next byte.
@@ -16,7 +18,7 @@ Open Cheat Engine
 
 Now we want to see "Find out what writes to this address"
 	when you find an instruction (the one with most uses/count) press "Show this Address in the Disassembler"
-		then Go to Address and copy the address
+		then "Go to Address" and copy the address
 005BF8E4
 
 Detach Cheat Engine from process (it may confuse Ollydbg).

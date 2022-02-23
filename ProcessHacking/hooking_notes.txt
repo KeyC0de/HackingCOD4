@@ -1,0 +1,86 @@
+Now how could we hook?
+1. Internal hack: we create a dll that we will use to inject into the target process's address space
+2. External hack: we create a separate process that will hijack and intercept the direct3d calls of our target process
+
+Another method of hooking involves writing a jump to the target function
+	and not to a call site of that function
+	which in turn redirects flow of the program to our hooked function.
+
+This operation is destructive since there is no trampoline being constructed and the original
+	function is not longer callable.
+
+Hooking virtual functions this way is a little a bit different.
+To install a hook into a virtual member function we get its address by the object's vtable.
+
+For obvious reasons.. you can't hook an inlined function or member function.
+__declspec( noinline ) may come in handy.
+
+
+Hooking virtual functions:
+The location of a vtable in memory is implementation dependent.
+The compiler may place it anywhere as long as its allocation strategy remains constistent.
+In fact, the C++ standard doesn't even mention a vtable.
+But it is typically the case, and especially in VC++ that it is stored at the beginning of
+	the object, before any member variable.
+Whatever the case may be the vtables are statically allocated somewhere in the process
+	address space.
+
+There also may be multiple vtable pointers, if your class multiply-inherits from multiple
+	classes with vtables.
+eg.
+class A
+{
+	virtual Ax() {}
+	int a, b;
+};
+class B
+{
+	virtual Bx() {}
+	int c, d;
+};
+class C
+	: public A,
+	public B
+{
+	int foo, bar;
+};
+
+Then the object memory layout for an object C, looks like this:
+A's VTable ptr
+A's member variables.
+B's Vtable ptr
+B's member variables.
+C's member variables.
+
+
+Trampoline:
+Installing a hook overwrites at least the first 5 bytes in the target function.
+That function is no longer callable by the target process.
+Thus it's liable to crash.
+A "trampoline hook" is an extension of a hook which copies the first few bytes of
+	the targetFunction to an allocated memory block, safekeeping them to restore them 
+	after the call to hookedFunction. As such nobody notices that any hooking took place
+	and control resumes as normal.
+
+So how it all works together?
+1. We overwrite the targetFunction's first few bytes with a jmp/call instruction
+	to our hookedFunction.
+2. Our hookedFunction does whatever it wants with the arguments intended for the targetFunction.
+3. Once hookedFunction does its thing, it calls the allocated memory block
+4. The last instruction at this block calls the original targetFunction
+
+
+Warning:
+- the "targetFunction" needs to have exact number and order of parameters as the "hookedFunction".
+	Otherwise the stack will be corrupted.
+
+
+
+
+
+
+
+
+
+There are other hooking techniques out there.
+One very interesting is import address table hooking, which RenderDoc uses.
