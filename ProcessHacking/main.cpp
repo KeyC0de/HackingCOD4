@@ -781,7 +781,7 @@ void setSuspendOtherThreads( bool bSuspend )
 	}
 }
 
-// you can only change the protection of an entire not a portion of it
+// you can only change the protection of an entire page not a portion of it
 void writeProtectedMemory( void* p,
 	char* pData,
 	int nBytes )
@@ -1500,8 +1500,10 @@ void tests()
 	auto ret = getProcessIntegrityLevel();
 	if ( ret.first != 0 )
 	{
+#if defined _DEBUG && !defined NDEBUG
 		KeyConsole& console = KeyConsole::getInstance();
 		console.print( ret.second );
+#endif
 	}
 	
 	spawnProcess( L"C:\\Windows\\System32\\calc.exe" );
@@ -1549,22 +1551,30 @@ int WINAPI wWinMain( HINSTANCE hInst,
 		{
 			readAmmo = readProcessMemory<DWORD>( hProc,
 				pAmmo );
+#if defined _DEBUG && !defined NDEBUG
 			KeyConsole& console = KeyConsole::getInstance();
 			console.print( std::to_string( readAmmo ) + '\n' );
+#endif
 			Sleep( 1000 );
 		}
 
 		// overwrite the value for funzies
 		std::cout << "How much ammo do you want to have?\n";
+#if defined _DEBUG && !defined NDEBUG
 		KeyConsole& console = KeyConsole::getInstance();
 		std::string ammoStr = console.read( 8 );
 		desiredAmmo = std::atoi( ammoStr.c_str() );
 		console.print( "you typed = " + std::to_string( desiredAmmo ) );
+#else
+		desiredAmmo = 100;
+#endif
 		bytesWritten = writeProcessMemory( hProc,
 			pAmmo,
 			desiredAmmo );
 	}
 
+#if defined _DEBUG && !defined NDEBUG
 	KeyConsole::getInstance().resetInstance();
+#endif
 	return 0;
 }

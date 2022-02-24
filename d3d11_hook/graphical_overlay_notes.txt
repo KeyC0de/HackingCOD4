@@ -31,9 +31,8 @@ So it all comes down to getting the virtual table address and its offset to ::Pr
 1. Find D3D11CreateDeviceAndSwapChain. So create this function with the right type signature
 	and in the function body, load the real d3d11.dll and call the real D3D11CreateDeviceAndSwapChain function.
 2. We will target D3D11CreateDeviceAndSwapChain::Present. It is located at a fixed offset
-	from D3D11CreateDeviceAndSwapChain's vtable address. So it comes down to finding this
-	address.
+	from D3D11CreateDeviceAndSwapChain's vtable address. So it comes down to finding this address.
 
 
 We can create a "proxy" version of a dll and place it to the executable's directory.
-To find such a function we used CFF Explorer.
+To find such a function we can use CFF Explorer.

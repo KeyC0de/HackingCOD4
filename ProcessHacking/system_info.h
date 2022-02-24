@@ -36,7 +36,6 @@ public:
 	static int getFirmwareTypeBiosOrUefi();
 	// returns NetBios style computer name
 	static std::wstring getComputerName();
-
 	//===================================================
 	//	\function	getCpuUsage
 	//	\brief  CPU usage is CPU time divided by real time
@@ -55,7 +54,6 @@ public:
 	//				if the system spends equal time being idle and used, that is, idle time == (kernel time + user time),
 	//	\date	2021/09/21 12:17
 	static float getCpuUsage();
-
 	// PF_ARM_64BIT_LOADSTORE_ATOMIC: The 64-bit load/store atomic instructions are available.
 	// PF_ARM_DIVIDE_INSTRUCTION_AVAILABLE: The divide instructions are available.
 	// PF_ARM_EXTERNAL_CACHE_AVAILABLE: The external cache is available.

@@ -66,8 +66,6 @@ uint32_t WriteRelativeJump(void* func2hook, void* jumpTarget, uint8_t numTrailin
 	return sizeof(jmpInstruction) + numTrailingNOPs;
 }
 
-
-
 void* AllocPageInTargetProcess(HANDLE process)
 {
 	SYSTEM_INFO sysInfo;
@@ -126,6 +124,7 @@ void* AllocatePageNearAddressRemote(HANDLE handle, void* targetAddr)
 	return nullptr;
 }
 
+// AllocatePageNearAddress finds memory close to the target function to allocate our relay function
 void* AllocatePageNearAddress(void* targetAddr)
 {
 	return AllocatePageNearAddressRemote(GetCurrentProcess(), targetAddr);
@@ -173,10 +172,9 @@ __declspec(noinline) void HookPayload(Color* color)
 
 void WriteTrampoline(void* dst, void* payloadFuncAddr, void* func2hook, uint8_t* stolenBytes, uint32_t numStolenBytes)
 {
-
 	//the trampoline consists of the stolen bytes from the target function, following by a jump back
-	//to the target function + 5 bytes, in order to continue the execution of that function. This continues like
-	//a normal function call
+	//to the target function + 5 bytes, in order to continue the execution of that function.
+	// This continues like a normal function call
 	void* trampolineJumpTarget = ((uint8_t*)func2hook + 5);
 
 	uint8_t* dstIter = (uint8_t*)dst;
@@ -299,64 +297,17 @@ void hook(void* targetFunc, void* hookedFunc)
 	memcpy(targetFunc, jmpInstruction, sizeof(jmpInstruction));
 }
 
-// in 64 bit things are a bit trickier, because functions can be located so far away from
-//	each other than a 32 bit jump instruction can't jump that far.
-// There’s no such thing as a 64 bit relative jmp instruction, so the next best option is
-//	to jmp to an address stored in a register
-// eg.
-// mov r10, 400h	; r10 is volatile register not used by default on function calls so it's ideal
-// jmp r10
-// 
-// If we throw this in the beginning of our targetFunction instead of the 5 byte jump from
-//	before, we’d limit the number of functions that we could hook to those with 13 or more
-//	bytes. That’s a significantly bigger limitation than our 32 bit code, so we’re instead
-//	going to write the bytes for this absolute jump somewhere in memory that’s close to the
-//	function we’re hooking. Then we’ll have the 5 byte jump we install in that function
-//	jump to this absolute jump, instead of straight to the payload function.
-// This intermediate function is known as the relay function.
-// Then the relay function will jump to our hookedFunction
-// Then the hookedFunction will do its work and will jump to our trampoline
-// Finally the trampoline will jump to the targetFunction's body
-//
-// What we need to do to make a trampoline is copy the first 5 bytes to a buffer
-//	before we overwrite them with our hook.
-// In the easy case those 5 bytes would contain whole instructions.
-// But in most cases in the real world this won't be the case.
-// We're going to have to get our hands dirty.
-// We're going to need to steal 5 or more bytes (rounded up to the nearest whole
-//	instruction) of this function instead of the first 5B, such that we can execute whole
-//	instructions in our trampoline.
-// If those bytes contain jmp/call instructions or other rip-relative instructions
-//	(like like lea rcx,[rip+0xbeef]) then we have to reconstruct their addresses
-// We refer to this as the absolute instruction table (AIT).
-//	For each relative jump or call instruction, calculate the address that it originally intended to reference, and add an absolute jmp/call to that address in the Absolute Instruction Table.
-// Rewrite the relative instructions in the stolen bytes to jump to their corresponding entry in the Absolute Instruction Table.
-// Finally jump back to the next byte of the targetFunction's body.
-//
-// Note that we're going to build our trampoline function in the same "near" memory that
-//	the relay function is currently being constructed in.
-//
-// The verb “steal” is important here - we’re not only going to copy these instruction bytes, we’re also going to replace them with 1 byte NOPs in the target function. That way won’t wind up with any partial instructions when we install the hook jump.
-// 
-// To make sure we steal whole instructions, we need to use a disassembly library.
-// We'll use the Capstone library.
-// Capstone will help us detect whether a whole instruction is rip relative or a jmp/call instruction.
-// Then we relocateInstruction
-// 
-//
-// AllocatePageNearAddress finds memory close to the target function to allocate our relay
-//	function. Then we do:
 void WriteAbsoluteJump64(void* absJumpMemory, void* addrToJumpTo)
 {
-  uint8_t absJumpInstructions[] = 
-  { 
-	0x49, 0xBA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //mov r10, addr
-	0x41, 0xFF, 0xE2 //jmp r10
-  }; 
-
-  uint64_t addrToJumpTo64 = (uint64_t)addrToJumpTo;
-  memcpy(&absJumpInstructions[2], &addrToJumpTo64, sizeof(addrToJumpTo64));
-  memcpy(absJumpMemory, absJumpInstructions, sizeof(absJumpInstructions));
+	uint8_t absJumpInstructions[] =
+	{
+		0x49, 0xBA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //mov r10, addr
+		0x41, 0xFF, 0xE2 //jmp r10
+	}; 
+	
+	uint64_t addrToJumpTo64 = (uint64_t)addrToJumpTo;
+	memcpy(&absJumpInstructions[2], &addrToJumpTo64, sizeof(addrToJumpTo64));
+	memcpy(absJumpMemory, absJumpInstructions, sizeof(absJumpInstructions));
 }
 
 void InstallHook(void* func2hook, void* payloadFunction)
@@ -380,32 +331,6 @@ void InstallHook(void* func2hook, void* payloadFunction)
 	//install the hook
 	memcpy(func2hook, jmpInstruction, sizeof(jmpInstruction));
 }
-
-// That is all we need to know to hook functions in x32/x64 that we have source access to
-// But what about running programs? Read on..
-// 
-// The easiest way to infiltrate a running program that we don't have source access, is to
-//	inject a dll to it. And we need to do some extra work to get a pointer to
-//	our targetFunction
-// What we’re after is the relative virtual address (RVA) of the beginning of this function.
-// So we gotta use a debugger. x64dbg is ideal.
-//	Find the symbols it's importing
-//	put a breakpoint in one of them depending on what you wanna do
-//	RMB on the address & Copy -> RVA
-// Since programs (and individual modules, thanks to ASLR) can be loaded into memory at different locations across multiple runs of the same program, having the RVA of a function means that we can reliably get that function’s address, no matter where the process is loaded in memory.
-// If our targetFunction is not imported from a dll then it is implemented inside the base
-//	module of the process. To find the address of the base module "myModule" is equivalent
-//	to finding the base address of the process "myModule.exe".
-// so targetFunction = (void*)( getModuleBaseAddress() + RVA )
-// 
-// Add instructions to the AIT is not enough.
-// We also have to rewrite the stolen instruction. This needs to be handled differently
-//	for jumps & calls
-//
-// 
-//
-// What if the instruction is a loop?
-// To be delayed. Not handling loops for now.
 
 
 
@@ -437,6 +362,3 @@ int WINAPI DllMain( HINSTANCE hDll,
 	}
 	return TRUE;
 }
-
-
-// acknowledgements: http://kylehalladay.com/blog/2020/11/13/Hooking-By-Example.html

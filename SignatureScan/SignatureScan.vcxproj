@@ -127,9 +127,6 @@
     <ClCompile Include="dll_main.cpp" />
     <ClCompile Include="winner.h" />
   </ItemGroup>
-  <ItemGroup>
-    <Text Include="sigscan_notes.txt" />
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

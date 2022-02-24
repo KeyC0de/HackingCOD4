@@ -1,48 +1,52 @@
 Now how could we hook?
 1. Internal hack: we create a dll that we will use to inject into the target process's address space
-2. External hack: we create a separate process that will hijack and intercept the direct3d calls of our target process
+2. External hack: we create a separate process that will hijack and intercept the calls our target process is making
 
 Another method of hooking involves writing a jump to the target function
 	and not to a call site of that function
 	which in turn redirects flow of the program to our hooked function.
 
-This operation is destructive since there is no trampoline being constructed and the original
-	function is not longer callable.
-
-Hooking virtual functions this way is a little a bit different.
-To install a hook into a virtual member function we get its address by the object's vtable.
+	This operation is destructive since there is no trampoline being constructed and the original
+		function is no longer callable.
 
 For obvious reasons.. you can't hook an inlined function or member function.
-__declspec( noinline ) may come in handy.
+	__declspec( noinline ) may come in handy.
 
 
 Hooking virtual functions:
+Hooking virtual functions is a little a bit different.
+To install a hook into a virtual member function we get its address by the object's vtable.
 The location of a vtable in memory is implementation dependent.
-The compiler may place it anywhere as long as its allocation strategy remains constistent.
+The compiler may place it anywhere as long as its allocation strategy remains consistent.
 In fact, the C++ standard doesn't even mention a vtable.
 But it is typically the case, and especially in VC++ that it is stored at the beginning of
 	the object, before any member variable.
-Whatever the case may be the vtables are statically allocated somewhere in the process
+Note that there is only one vtable per class (not per object).
+Each object stores a pointer, known as vpointer, to its vtable(s).
+Whatever the case may be the vtables are statically allocated somewhere in the process'
 	address space.
 
-There also may be multiple vtable pointers, if your class multiply-inherits from multiple
+There may also exist multiple vtable pointers, if your class multiply-inherits from multiple
 	classes with vtables.
 eg.
 class A
 {
-	virtual Ax() {}
+	virtual Ax()
+	{}
 	int a, b;
 };
 class B
 {
-	virtual Bx() {}
+	virtual Bx()
+	{}
 	int c, d;
 };
 class C
 	: public A,
 	public B
 {
-	int foo, bar;
+	int foo;
+	int bar;
 };
 
 Then the object memory layout for an object C, looks like this:
@@ -53,10 +57,11 @@ B's member variables.
 C's member variables.
 
 
-Trampoline:
+
+Trampoline
+==========
 Installing a hook overwrites at least the first 5 bytes in the target function.
 That function is no longer callable by the target process.
-Thus it's liable to crash.
 A "trampoline hook" is an extension of a hook which copies the first few bytes of
 	the targetFunction to an allocated memory block, safekeeping them to restore them 
 	after the call to hookedFunction. As such nobody notices that any hooking took place
@@ -66,8 +71,8 @@ So how it all works together?
 1. We overwrite the targetFunction's first few bytes with a jmp/call instruction
 	to our hookedFunction.
 2. Our hookedFunction does whatever it wants with the arguments intended for the targetFunction.
-3. Once hookedFunction does its thing, it calls the allocated memory block
-4. The last instruction at this block calls the original targetFunction
+3. hookedFunction calls the allocated memory block
+4. The last instruction of this block calls the original targetFunction
 
 
 Warning:
@@ -75,12 +80,186 @@ Warning:
 	Otherwise the stack will be corrupted.
 
 
-
-
-
-
-
-
-
 There are other hooking techniques out there.
 One very interesting is import address table hooking, which RenderDoc uses.
+
+
+Pattern Scanning
+================
+Goal: We search for instructions in memory to replace with our own to change process behavior to suit our needs.
+
+Pattern Scanning or Signature Scanning is the art of finding a sequence of bytes in memory which matches a sequence of bytes you have already identified. You scan the good regions of memory byte by byte looking for the first byte. When the first byte is found, you compare each subsequent byte against the known pattern. If all the bytes are found, your pattern is found. If your comparison for 1 byte fails, you start all over again at the next byte.
+
+Note that we pattern scan for Code not data.
+We can scan a module, instead of an entire address.
+What has been explained thus far forms the elementary part of a trainer.
+
+
+--- Process:
+
+Open Cheat Engine
+	find the address you want
+
+Now we want to see "Find out what writes to this address"
+	when you find an instruction (the one with most uses/count) press "Show this Address in the Disassembler"
+		then "Go to Address" and copy the address
+005BF8E4
+
+Detach Cheat Engine from process (it may confuse Ollydbg).
+
+Open Ollydbg and attach the process
+	(Olly version 1) (with signature scan plugin installed Ollydbg.dll)
+paste address by typing in: Go to -> Expression (Follow Expression window appears)
+
+005BF8E4   8994B8 34010000  MOV DWORD PTR DS:[EAX+EDI*4+134],EDX
+
+when you find it -> RMB -> Make Sig -> Test Sig - copy and paste it
+Signature: \x89\x94\xB8\x00\x00\x00\x00
+Mask: xxx????
+	Question marks indicate relocatable instruction bytes so we won't consider them in our scanning later in the code
+Press "Scan" to make sure this pattern exists uniquely in the executable's memory.
+
+Also note down the signature length (in Bytes):
+This means we need that many amount of nop (\x90) instructions.
+Here the signature is 7 bytes, thus:
+\x90\x90\x90\x90\x90\x90\x90
+
+In cheat engine also check the module name. It should be something like
+moduleName+{address}
+
+iw3sp.exe+1BF8E4
+
+So "iw3sp.exe" is what we need.
+
+With all this info noted down, lets go to Visual Studio and create a dll..
+Inject the dll (in some manner) to your target process.
+Don't forget to detach any debuggers before you attach the dll!
+
+
+Anti Hacking
+============
+https://waleedassar.blogspot.com/2011/12/debuggers-anti-attaching-techniques.html
+I. Some processes have anti-cheating/hacking/debugging techniques embedded in.
+These typically work by hooking addresses such as DbgUiRemoteBreakin or DbgBreakPoint
+Trying to attach to such a process results into terminating the process.
+
+To bypass this set a breakpoint on the "RtlCreateUserThread" function call,
+	and finally modify its seventh parameter to point to any int3 in the target process' address space.
+Once execution stops at int3 (in the debugged program), kill the current thread.
+This way we can bypass this anti-attach trick whether the "DbgUiRemoteBreakin" or "DbgBreakPoint" function is patched in the target process' address space.
+
+II.
+The point here is based on the fact that only one debugger is allowed to debug a specific process.
+Implementing it is as easy as creating two executables.
+EXE1 spawns and then debugs EXE2. So, any further attempt to debug EXE2 will fail.
+N.B. Any attempt to close EXE1 will result in EXE2 being closed as such.
+
+To circumvent it, all we have to do is detach EXE2 from its debugger (EXE1) by calling the "DebugActiveProcessStop" function in context of the debugging thread in EXE1.
+Create a small debugger (I refer to it as EXE3) which:
+1) EXE3 hacks-into/debugs EXE1.
+2) EXE3 patches the "WaitForDebugEvent" function in the debug loop of EXE1, inserting a jump to the "DebugActiveProcessStop" function.
+
+
+64 bit hook
+===========
+in 64 bit things are a bit trickier, because functions can be located so far away from
+	each other than a 32 bit jump instruction can't jump that far.
+There's no such thing as a 64 bit relative jmp instruction, so the next best option is
+	to jmp to an address stored in a register
+eg.
+mov r10, 400h	; r10 is volatile register not used by default on function calls so it's ideal
+jmp r10
+
+If we throw this in the beginning of our targetFunction instead of the 5 byte jump from
+	before, we'd limit the number of functions that we could hook to those with 13 or more
+	bytes. That's a significantly bigger limitation than our 32 bit code, so we're instead
+	going to write the bytes for this absolute jump somewhere in memory that's close to the
+	function we're hooking. Then we'll have the 5 byte jump we install in that function
+	jump to this absolute jump, instead of straight to the payload function.
+
+file: jump64.asm
+jmps are relative to the instruction pointer
+to absolute jmp to an address we need to use `call` instead
+eg
+	call qword ptr[addressToJumpTo]
+		or
+	call register
+
+This intermediate function is known as the relay function.
+Then the relay function will jump to our hookedFunction, which will do whatever we want to
+When the hookedFunction is done it will 64 bit jump to our trampoline
+The trampoline will execute the 5 or more first instruction bytes found in targetFunction
+	and then jump back to the targetFunction's body.
+
+What we need to do to make a trampoline is copy the first 5 bytes to a buffer
+	before we overwrite them with our hook.
+In the easy case those 5 bytes would contain whole instructions.
+But in most cases in the real world this won't be the case.
+We're going to have to get our hands dirty.
+We're going to need to steal 5 or more bytes (rounded up to the nearest whole
+	instruction) of this function instead of the first 5B, such that we can execute whole
+	instructions in our trampoline.
+If those bytes contain jmp/call instructions or other rip-relative instructions
+	(like like lea rcx,[rip+0xbeef]) then we have to reconstruct their addresses
+We refer to this as the absolute instruction table (AIT).
+For each relative jump or call instruction, calculate the address that it originally intended to reference, and add an absolute jmp/call to that address in the Absolute Instruction Table.
+Rewrite the relative instructions in the stolen bytes to jump to their corresponding entry in the Absolute Instruction Table.
+Finally jump back to the next byte of the targetFunction's body.
+
+The verb "steal" is important here - we're not only going to copy these instruction bytes, we're also going to replace them with 1 
+	byte NOPs in the target function. That way we won't wind up with any partial instructions when we install the hook jump.
+
+Note that we're going to build our trampoline function in the same "near" memory that
+	the relay function is currently being constructed in.
+
+To make sure we steal whole instructions, we need to use a disassembly library.
+We'll use the Capstone library.
+Capstone will help us detect whether a whole instruction is rip relative or a jmp/call instruction.
+Then we relocateInstruction.
+
+
+Hooking running programs
+========================
+That is all we need to know to hook functions in x32/x64 that we have source access to
+But what about running programs? Read on..
+ 
+The easiest way to infiltrate a running program that we don't have source access, is to
+	inject a dll to it. And we need to do some extra work to get a pointer to
+	our targetFunction
+What we're after is the relative virtual address (RVA) of the beginning of this function.
+So we gotta use a debugger. x64dbg is ideal.
+	Find the symbols it's importing
+	put a breakpoint in one of them depending on what you wanna do
+	RMB on the address & Copy -> RVA
+Since programs (and individual modules, thanks to ASLR) can be loaded into memory at different locations across multiple runs of the same program, having the RVA of a function means that we can reliably get that function's address, no matter where the process is loaded in memory.
+If our targetFunction is not imported from a dll then it is implemented inside the base
+module of the process. To find the address of the base module "myModule" is equivalent
+to finding the base address of the process "myModule.exe".
+so targetFunction = (void*)( getModuleBaseAddress() + RVA )
+
+Adding instructions to the AIT is not enough.
+We also have to rewrite the stolen instruction. This needs to be handled differently
+for jumps & calls
+
+What if the instruction is a loop?
+Not handling loops for now.. TBC..
+
+
+Acknowledgements
+================
+http://kylehalladay.com/blog/2020/11/13/Hooking-By-Example.html
+
+
+
+Example Processes
+=================
+TQ
+--
+Money
+	Address:
+		24895CD0
+
+	Instruction:
+		Go to address: 0165CED3
+		mov [edx+00000AF0],eax
+		Game.GAME::MarketArmor_Used::GetMarketType+3A43 - 89 82 F00A0000
